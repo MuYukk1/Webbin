@@ -3,7 +3,7 @@
 // @name:en      Webbin Saver
 // @description  保存网页正文/B站视频到自己的 Cloudflare Worker,双端 Edge 可用;B站视频可抓取字幕/评论,AI 总结、历史查看、下载归档
 // @namespace    https://github.com/local/webbin
-// @version      0.7.4
+// @version      0.7.5
 // @updateURL    /userscript.user.js
 // @author       you
 // @match        *://*/*
@@ -655,7 +655,7 @@
     return base ? base + "/userscript.user.js" : "";
   };
   const SCRIPT_VERSION =
-    (typeof GM_info !== "undefined" && GM_info.script && GM_info.script.version) || "0.7.4";
+    (typeof GM_info !== "undefined" && GM_info.script && GM_info.script.version) || "0.7.5";
   let versionCache = null;
 
   function renderVersionFooter(el, v) {
@@ -945,6 +945,8 @@
 
   // 跨面板开关保留选择状态(页面刷新即清空)
   const selectedIds = new Set();
+  // 上一次批量总结的失败报告:{ failures:[{title,msg}], aborted, remain },跨 Tab 重建保留
+  let batchReport = null;
 
   function buildListTab(body) {
     // 常驻批量栏:未选择时按钮置灰而不是隐藏,避免出现/消失导致列表跳动
@@ -953,11 +955,47 @@
       background: C.bg, padding: "8px 0", "border-bottom": `1px solid ${C.border}`,
       "align-items": "center", gap: "8px", "flex-wrap": "wrap",
     });
+    const reportEl = h("div");
     const listEl = h("div");
-    body.append(bar, listEl);
+    body.append(bar, reportEl, listEl);
     let items = [];
     let busy = false;
     const barButtons = {};
+
+    // 批量总结失败报告:按错误信息分组展示,比一闪而过的 toast 更可靠
+    const renderReport = () => {
+      reportEl.replaceChildren();
+      if (!batchReport || !batchReport.failures.length) return;
+      const groups = new Map();
+      for (const f of batchReport.failures) {
+        if (!groups.has(f.msg)) groups.set(f.msg, []);
+        groups.get(f.msg).push(f.title);
+      }
+      const box = h("div", {
+        margin: "8px 0 0", padding: "8px 10px", "border-radius": "8px",
+        background: C.bg2, border: `1px solid ${C.danger}`, "font-size": "12px",
+      });
+      const close = h("span", { float: "right", color: C.sub, cursor: "pointer", "font-weight": "400" }, "✕");
+      close.title = "关闭报告";
+      close.addEventListener("click", () => { batchReport = null; renderReport(); });
+      box.append(h("div", { color: C.danger, "font-weight": "600" },
+        `⚠ ${batchReport.failures.length} 条总结失败` +
+        (batchReport.aborted ? `(连续同错,已中止剩余 ${batchReport.remain} 条)` : ""), close));
+      let shown = 0;
+      for (const [msg, titles] of groups) {
+        if (shown >= 3) {
+          box.append(h("div", { color: C.sub, "margin-top": "2px" }, `…共 ${groups.size} 类错误`));
+          break;
+        }
+        box.append(h("div", { "margin-top": "3px", "line-height": "1.5" },
+          h("span", { color: C.danger }, `· ${msg.slice(0, 100)}`),
+          h("span", { color: C.sub },
+            ` ←《${titles[0].slice(0, 24)}》${titles.length > 1 ? ` 等 ${titles.length} 条` : ""}`),
+        ));
+        shown++;
+      }
+      reportEl.append(box);
+    };
 
     const renderList = () => {
       listEl.replaceChildren();
@@ -1034,6 +1072,7 @@
     }
 
     // 只总结有正文且尚未总结的;无正文(B站链接)与已有总结的跳过
+    // 逐条记录失败原因;连续 2 条相同错误视为系统性问题(模型不存在/密钥无效/限流),提前中止不再干等
     async function batchSummarize() {
       if (busy) return;
       const targets = items.filter((it) => selectedIds.has(it.id) && it.has_content && !it.has_summary);
@@ -1048,16 +1087,31 @@
       )) return;
       busy = true;
       renderBar();
-      let ok = 0, fail = 0;
+      let ok = 0, streak = 0, lastMsg = "", aborted = false;
+      const failures = [];
       for (let i = 0; i < targets.length; i++) {
         barButtons.sum.textContent = `⏳ 总结中 ${i + 1}/${targets.length}`;
         try {
           await gmFetch("POST", "/api/summarize", { id: targets[i].id });
           ok++;
-        } catch { fail++; }
+          streak = 0; lastMsg = "";
+        } catch (e) {
+          failures.push({ title: targets[i].title, msg: e.message });
+          if (e.message === lastMsg) streak++; else { streak = 1; lastMsg = e.message; }
+          if (streak >= 2) { aborted = true; break; }
+        }
       }
       busy = false;
-      toast(`总结完成:成功 ${ok},失败 ${fail}` + (skipped ? `,跳过 ${skipped} 条` : ""));
+      const remain = aborted ? targets.length - ok - failures.length : 0;
+      batchReport = { failures, aborted, remain };
+      toast(
+        `总结完成:成功 ${ok}` +
+        (failures.length ? `,失败 ${failures.length}${aborted ? "(已中止)" : ""} ⚠` : " ✓") +
+        (skipped ? `,跳过 ${skipped}` : "") +
+        (remain ? `,剩余 ${remain} 条未处理` : "") +
+        (failures.length ? ",失败原因见列表顶部报告" : ""),
+        failures.length > 0,
+      );
       switchTab("list");
     }
 
@@ -1085,6 +1139,7 @@
     }
 
     renderBar(); // 列表加载期间批量栏先常驻显示
+    renderReport(); // 上一次批量总结如有失败,进来就看到
     const loading = h("div", { color: C.sub, padding: "20px", "text-align": "center" }, "加载中…");
     listEl.append(loading);
     gmFetch("GET", "/api/items")
@@ -1316,6 +1371,21 @@
         });
     });
 
+    // 拉取模型列表并填充下拉;silentFail 时不单独弹错误,由调用方合并提示
+    const doRefreshModels = (silentFail) => {
+      $storage.set("worker", workerInput.value.trim());
+      $storage.set("token", tokenInput.value.trim());
+      return gmFetch("POST", "/api/models", {})
+        .then(({ models, current }) => {
+          modelSelect.replaceChildren(h("option", { value: "" }, `共 ${models.length} 个模型`));
+          for (const m of models) modelSelect.append(h("option", { value: m }, m));
+          if (current && models.includes(current)) modelSelect.value = current;
+          if (current) modelInput.value = current;
+          return models.length;
+        })
+        .catch((e) => { if (!silentFail) toast(e.message, true); throw e; });
+    };
+
     const loadCfg = mkBtn("读取云端 LLM 配置", () => {
       $storage.set("worker", workerInput.value.trim());
       $storage.set("token", tokenInput.value.trim());
@@ -1325,7 +1395,10 @@
           modelInput.value = s.model || "";
           apiKeyInput.value = "";
           apiKeyInput.placeholder = s.api_key_masked ? `当前: ${s.api_key_masked}(不改则保留)` : "sk-…";
-          toast("已读取云端配置 ✓");
+          // 读到配置后自动拉一次模型列表,免去每次手动刷新;失败不影响配置读取结果
+          return doRefreshModels(true)
+            .then((n) => toast(`已读取云端配置 ✓ 模型列表已更新(${n} 个)`))
+            .catch(() => toast("已读取云端配置 ✓(模型列表拉取失败,可点「刷新模型列表」重试)", true));
         })
         .catch((e) => toast(e.message, true));
     });
@@ -1341,22 +1414,15 @@
         .then((s) => {
           apiKeyInput.value = "";
           apiKeyInput.placeholder = s.api_key_masked ? `当前: ${s.api_key_masked}` : "";
-          toast("LLM 配置已保存 ✓");
+          return doRefreshModels(true)
+            .then((n) => toast(`LLM 配置已保存 ✓ 模型列表已更新(${n} 个)`))
+            .catch(() => toast("LLM 配置已保存 ✓(模型列表拉取失败,可手动刷新)", true));
         })
         .catch((e) => toast(e.message, true));
     });
 
     const refreshModels = mkBtn("刷新模型列表", () => {
-      $storage.set("worker", workerInput.value.trim());
-      $storage.set("token", tokenInput.value.trim());
-      gmFetch("POST", "/api/models", {})
-        .then(({ models, current }) => {
-          modelSelect.replaceChildren(h("option", { value: "" }, `共 ${models.length} 个模型`));
-          for (const m of models) modelSelect.append(h("option", { value: m }, m));
-          if (current && models.includes(current)) modelSelect.value = current;
-          if (current) modelInput.value = current;
-        })
-        .catch((e) => toast(e.message, true));
+      doRefreshModels(false).then((n) => toast(`已拉取 ${n} 个模型 ✓`)).catch(() => {});
     });
 
     body.append(
