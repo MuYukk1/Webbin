@@ -3,7 +3,7 @@
 // @name:en      Webbin Saver
 // @description  保存网页正文/B站视频到自己的 Cloudflare Worker,双端 Edge 可用;B站视频可抓取字幕/评论,AI 总结、历史查看、下载归档
 // @namespace    https://github.com/local/webbin
-// @version      0.7.7
+// @version      0.7.8
 // @updateURL    /userscript.user.js
 // @author       you
 // @match        *://*/*
@@ -655,7 +655,7 @@
     return base ? base + "/userscript.user.js" : "";
   };
   const SCRIPT_VERSION =
-    (typeof GM_info !== "undefined" && GM_info.script && GM_info.script.version) || "0.7.7";
+    (typeof GM_info !== "undefined" && GM_info.script && GM_info.script.version) || "0.7.8";
   let versionCache = null;
 
   function renderVersionFooter(el, v) {
@@ -786,6 +786,8 @@
     }
     const body = panel._state.body;
     body.replaceChildren();
+    // 列表 Tab 顶部内边距归零:批量栏 sticky top:0 才能钉在可见顶边,内容不会从栏上方露出
+    body.style.setProperty("padding", key === "list" ? "0 14px 14px" : "14px");
     if (ANIM.fade) body.setAttribute("data-wi-anim", "fade");
     else body.removeAttribute("data-wi-anim");
     tabPages[key](body);
@@ -956,14 +958,15 @@
 
   function buildListTab(body) {
     // 常驻批量栏:未选择时按钮置灰而不是隐藏,避免出现/消失导致列表跳动
-    // 负 margin 铺满滚动区整个顶部(含 body 内边距区),钉住时从最顶端盖住,内容只会从栏下方滑过
-    // 半透明 + backdrop-filter 毛玻璃:滑过的内容被虚化,不再露缝
+    // 半透明 + backdrop-filter 毛玻璃:内容从栏下滑过时被虚化
+    // 滚动区顶部内边距已在 switchTab 归零,栏钉住时从可见顶边盖住,不会露缝
+    // 左右负 margin 让栏背景铺满整个面板宽度,与下方内容的 14px 内边距对齐
     const bar = h("div", {
       display: "flex", position: "sticky", top: "0", "z-index": "3",
-      background: DARK ? "rgba(30,31,36,0.78)" : "rgba(255,255,255,0.78)",
+      background: DARK ? "rgba(30,31,36,0.68)" : "rgba(255,255,255,0.68)",
       backdropFilter: "blur(14px)",
       WebkitBackdropFilter: "blur(14px)",
-      padding: "8px 14px", margin: "-14px -14px 8px",
+      padding: "8px 14px", margin: "0 -14px 8px",
       "border-bottom": `1px solid ${C.border}`,
       "align-items": "center", gap: "8px", "flex-wrap": "wrap",
     });
