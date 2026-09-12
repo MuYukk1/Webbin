@@ -3,7 +3,7 @@
 // @name:en      Webbin Saver
 // @description  保存网页正文/B站视频到自己的 Cloudflare Worker,双端 Edge 可用;B站视频可抓取字幕/评论,AI 总结、历史查看、下载归档
 // @namespace    https://github.com/local/webbin
-// @version      0.7.9
+// @version      0.7.10
 // @updateURL    /userscript.user.js
 // @author       you
 // @match        *://*/*
@@ -131,10 +131,15 @@
     : { pop: "pop", fade: "fade", slide: "slide", grow: "grow" };
 
   // 挂载进场动画,结束后摘掉标记:fill both 的常驻动画状态可能干扰后代 backdrop-filter(毛玻璃)
+  // 只响应元素自身的 animationend,子元素动画冒泡不摘标记;不能用 once,冒泡事件会把监听器白白消耗掉
   const playAnim = (el, name) => {
     if (!el || !ANIM[name]) return;
     el.setAttribute("data-wi-anim", name);
-    el.addEventListener("animationend", () => el.removeAttribute("data-wi-anim"), { once: true });
+    el.addEventListener("animationend", function onEnd(e) {
+      if (e.target !== el) return;
+      el.removeEventListener("animationend", onEnd);
+      el.removeAttribute("data-wi-anim");
+    });
   };
 
   let toastEl = null;
@@ -670,7 +675,7 @@
     return base ? base + "/userscript.user.js" : "";
   };
   const SCRIPT_VERSION =
-    (typeof GM_info !== "undefined" && GM_info.script && GM_info.script.version) || "0.7.9";
+    (typeof GM_info !== "undefined" && GM_info.script && GM_info.script.version) || "0.7.10";
   let versionCache = null;
 
   function renderVersionFooter(el, v) {
@@ -971,9 +976,17 @@
   const selectedIds = new Set();
   // 上一次批量总结的失败报告:{ failures:[{title,msg}], aborted, remain },跨 Tab 重建保留
   let batchReport = null;
-  // 批量操作进行中标志与进度:模块级,中途切 Tab 重建列表后依然生效(防并发第二轮、恢复进度显示)
+  // 批量操作进行中标志与进度:模块级,中途切 Tab 重建列表后依然生效(防并发第二轮、进度实时跟随新按钮)
   let batchBusy = false;
-  let batchProgress = null; // { btn: "sum", text: "⏳ 总结中 2/5" }
+  let batchProgress = null;   // { btn: "sum", text: "⏳ 总结中 2/5" }
+  let batchBarButtons = null; // 当前列表 Tab 的批量按钮引用,Tab 重建时由 buildListTab 更新
+
+  // 把进度文案写到「当前活着」的按钮上:旧 Tab 的按钮已 detach,写它没有意义
+  const paintProgress = () => {
+    if (batchProgress && batchBarButtons && batchBarButtons[batchProgress.btn]) {
+      batchBarButtons[batchProgress.btn].textContent = batchProgress.text;
+    }
+  };
 
   function buildListTab(body) {
     // 常驻批量栏:未选择时按钮置灰而不是隐藏,避免出现/消失导致列表跳动
@@ -997,6 +1010,7 @@
     body.append(bar, reportEl, listEl);
     let items = [];
     const barButtons = {};
+    batchBarButtons = barButtons; // 批量循环经 paintProgress 写进度时,始终命中当前 Tab 的按钮
 
     // 批量总结失败报告:按错误信息分组展示,比一闪而过的 toast 更可靠
     const renderReport = () => {
@@ -1077,10 +1091,7 @@
         barButtons[key] = b;
         bar.append(b);
       }
-      // 批量进行中列表 Tab 被重建:把进度文案恢复到新按钮上
-      if (batchBusy && batchProgress && barButtons[batchProgress.btn]) {
-        barButtons[batchProgress.btn].textContent = batchProgress.text;
-      }
+      paintProgress(); // 批量进行中列表 Tab 被重建:进度实时恢复到新按钮
     }
 
     function clearSelection() {
@@ -1098,7 +1109,7 @@
       let ok = 0, fail = 0;
       for (let i = 0; i < ids.length; i++) {
         batchProgress = { btn: "del", text: `删除中 ${i + 1}/${ids.length}…` };
-        barButtons.del.textContent = batchProgress.text;
+        paintProgress();
         try {
           await gmFetch("DELETE", "/api/item/" + ids[i]);
           ok++;
@@ -1134,7 +1145,7 @@
       const failures = [];
       for (let i = 0; i < targets.length; i++) {
         batchProgress = { btn: "sum", text: `⏳ 总结中 ${i + 1}/${targets.length}` };
-        barButtons.sum.textContent = batchProgress.text;
+        paintProgress();
         try {
           await gmFetch("POST", "/api/summarize", { id: targets[i].id });
           ok++;
@@ -1167,7 +1178,7 @@
       batchBusy = true;
       renderBar();
       batchProgress = { btn: "dl", text: "打包中…" };
-      barButtons.dl.textContent = batchProgress.text;
+      paintProgress();
       try {
         const { items: fullItems } = await gmFetch("GET", "/api/items?full=1");
         const byId = new Map(fullItems.map((x) => [x.id, x]));
@@ -1448,8 +1459,8 @@
           toast("已读取云端配置 ✓"); // 先反馈配置结果,不等模型列表(可能挂到 120s 超时)
           // 随后自动拉一次模型列表,免去每次手动刷新;失败不影响配置读取结果
           return doRefreshModels(true)
-            .then((n) => toast(`已读取云端配置 ✓ 模型列表已更新(${n} 个)`))
-            .catch(() => toast("已读取云端配置 ✓(模型列表拉取失败,可点「刷新模型列表」重试)", true));
+            .then((n) => toast(`模型列表已更新(${n} 个) ✓`))
+            .catch(() => toast("模型列表拉取失败,可点「刷新模型列表」重试", true));
         })
         .catch((e) => toast(e.message, true))
         .finally(() => {
@@ -1473,8 +1484,8 @@
           apiKeyInput.placeholder = s.api_key_masked ? `当前: ${s.api_key_masked}` : "";
           toast("LLM 配置已保存 ✓");
           return doRefreshModels(true)
-            .then((n) => toast(`LLM 配置已保存 ✓ 模型列表已更新(${n} 个)`))
-            .catch(() => toast("LLM 配置已保存 ✓(模型列表拉取失败,可手动刷新)", true));
+            .then((n) => toast(`模型列表已更新(${n} 个) ✓`))
+            .catch(() => toast("模型列表拉取失败,可手动刷新", true));
         })
         .catch((e) => toast(e.message, true))
         .finally(() => {
