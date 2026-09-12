@@ -3,7 +3,7 @@
 // @name:en      Webbin Saver
 // @description  保存网页正文/B站视频到自己的 Cloudflare Worker,双端 Edge 可用;B站视频可抓取字幕/评论,AI 总结、历史查看、下载归档
 // @namespace    https://github.com/local/webbin
-// @version      0.7.8
+// @version      0.7.9
 // @updateURL    /userscript.user.js
 // @author       you
 // @match        *://*/*
@@ -105,8 +105,16 @@
     ok: "#22c55e",
   };
 
+  // #rrggbb → rgba() 半透明版:毛玻璃底色始终跟随调色板,不硬编码拷贝
+  const rgbaOf = (hex, a) => {
+    const n = parseInt(hex.slice(1), 16);
+    return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`;
+  };
+
   // 尊重「减少动态效果」系统设置:开启时禁用所有进出场/过渡动画
   const REDUCE_MOTION = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  // 尊重「减少透明度」系统设置:开启时毛玻璃退化为实心底色(Chrome/Edge 118+,不支持的浏览器返回 false)
+  const REDUCE_TRANSPARENCY = matchMedia("(prefers-reduced-transparency: reduce)").matches;
   if (typeof GM_addStyle === "function" && !REDUCE_MOTION) {
     GM_addStyle(`
 @keyframes wi-pop { from { opacity: 0; transform: translateY(8px) scale(.97) } to { opacity: 1; transform: none } }
@@ -122,6 +130,13 @@
     ? Object.fromEntries(["pop", "fade", "slide", "grow"].map((k) => [k, null]))
     : { pop: "pop", fade: "fade", slide: "slide", grow: "grow" };
 
+  // 挂载进场动画,结束后摘掉标记:fill both 的常驻动画状态可能干扰后代 backdrop-filter(毛玻璃)
+  const playAnim = (el, name) => {
+    if (!el || !ANIM[name]) return;
+    el.setAttribute("data-wi-anim", name);
+    el.addEventListener("animationend", () => el.removeAttribute("data-wi-anim"), { once: true });
+  };
+
   let toastEl = null;
   // 本次会话内保存的条目:KV 最终一致性(最长约60s)期间合并进列表,保存即所见
   const savedLocal = [];
@@ -133,7 +148,7 @@
       padding: "8px 16px", "border-radius": "8px", "font-size": "13px",
       "z-index": "2147483647", "max-width": "86vw", "box-shadow": "0 4px 16px rgba(0,0,0,0.25)",
     }, msg);
-    if (ANIM.fade) toastEl.setAttribute("data-wi-anim", "fade");
+    playAnim(toastEl, "fade");
     document.documentElement.append(toastEl);
     setTimeout(() => { if (toastEl) { toastEl.style.setProperty("opacity", "0"); toastEl.style.setProperty("transition", "opacity .25s ease"); } setTimeout(() => toastEl && toastEl.remove(), 260); }, isError ? 4200 : 2400);
   }
@@ -612,7 +627,7 @@
       "box-shadow": "0 2px 10px rgba(0,0,0,0.3)", "touch-action": "none",
       transition: "transform .15s ease, box-shadow .15s ease",
     });
-    if (ANIM.pop) btn.setAttribute("data-wi-anim", "pop");
+    playAnim(btn, "pop");
     btn.title = "Webbin 收集箱";
     btn.setAttribute("data-wi-ui", "1");
     btn.addEventListener("mouseenter", () => { btn.style.setProperty("transform", "scale(1.08)"); btn.style.setProperty("box-shadow", "0 4px 16px rgba(0,0,0,0.35)"); });
@@ -655,7 +670,7 @@
     return base ? base + "/userscript.user.js" : "";
   };
   const SCRIPT_VERSION =
-    (typeof GM_info !== "undefined" && GM_info.script && GM_info.script.version) || "0.7.8";
+    (typeof GM_info !== "undefined" && GM_info.script && GM_info.script.version) || "0.7.9";
   let versionCache = null;
 
   function renderVersionFooter(el, v) {
@@ -735,7 +750,7 @@
       background: "rgba(0,0,0,0.35)", display: "flex",
       "align-items": "center", "justify-content": "center",
     });
-    if (ANIM.fade) overlay.setAttribute("data-wi-anim", "fade");
+    playAnim(overlay, "fade");
     overlay.addEventListener("click", (e) => { if (e.target === overlay) closePanel(); });
 
     const tabs = h("div", { display: "flex", "border-bottom": `1px solid ${C.border}`, "flex-shrink": "0" });
@@ -754,7 +769,7 @@
       "box-shadow": "0 12px 48px rgba(0,0,0,0.35)",
       transition: "opacity .18s ease, transform .18s ease",
     }, tabs, body, footer);
-    if (ANIM.pop) panel.setAttribute("data-wi-anim", "pop");
+    playAnim(panel, "pop");
     panel.setAttribute("data-wi-ui", "1");
 
     for (const [key, label] of [["save", "当前页"], ["list", "已保存"], ["settings", "设置"]]) {
@@ -788,8 +803,8 @@
     body.replaceChildren();
     // 列表 Tab 顶部内边距归零:批量栏 sticky top:0 才能钉在可见顶边,内容不会从栏上方露出
     body.style.setProperty("padding", key === "list" ? "0 14px 14px" : "14px");
-    if (ANIM.fade) body.setAttribute("data-wi-anim", "fade");
-    else body.removeAttribute("data-wi-anim");
+    body.removeAttribute("data-wi-anim"); // 清掉上一 Tab 残留,毛玻璃栏不受常驻动画干扰
+    playAnim(body, "fade");
     tabPages[key](body);
   }
 
@@ -912,7 +927,8 @@
       }
       saveBtn.disabled = true;
       try {
-        if (!result.lines) {
+        // [] 也是 truthy:预览时提取失败留下的空数组要走重提取+警告,不能静默存空正文
+        if (!result.lines || !result.lines.length) {
           saveBtn.textContent = "⏳ 提取正文中…";
           const r = extractAndPreview();
           if (!r.lines.length) toast("未提取到正文,仅保存链接");
@@ -955,26 +971,31 @@
   const selectedIds = new Set();
   // 上一次批量总结的失败报告:{ failures:[{title,msg}], aborted, remain },跨 Tab 重建保留
   let batchReport = null;
+  // 批量操作进行中标志与进度:模块级,中途切 Tab 重建列表后依然生效(防并发第二轮、恢复进度显示)
+  let batchBusy = false;
+  let batchProgress = null; // { btn: "sum", text: "⏳ 总结中 2/5" }
 
   function buildListTab(body) {
     // 常驻批量栏:未选择时按钮置灰而不是隐藏,避免出现/消失导致列表跳动
-    // 半透明 + backdrop-filter 毛玻璃:内容从栏下滑过时被虚化
+    // 半透明 + backdrop-filter 毛玻璃:内容从栏下滑过时被虚化;底色由 C.bg 派生跟随调色板
     // 滚动区顶部内边距已在 switchTab 归零,栏钉住时从可见顶边盖住,不会露缝
     // 左右负 margin 让栏背景铺满整个面板宽度,与下方内容的 14px 内边距对齐
+    // prefers-reduced-transparency:开启时退化为实心底色、不做模糊
     const bar = h("div", {
       display: "flex", position: "sticky", top: "0", "z-index": "3",
-      background: DARK ? "rgba(30,31,36,0.68)" : "rgba(255,255,255,0.68)",
-      backdropFilter: "blur(14px)",
-      WebkitBackdropFilter: "blur(14px)",
+      background: REDUCE_TRANSPARENCY ? C.bg : rgbaOf(C.bg, 0.68),
       padding: "8px 14px", margin: "0 -14px 8px",
       "border-bottom": `1px solid ${C.border}`,
       "align-items": "center", gap: "8px", "flex-wrap": "wrap",
     });
+    if (!REDUCE_TRANSPARENCY) {
+      bar.style.setProperty("backdrop-filter", "blur(14px)");
+      bar.style.setProperty("-webkit-backdrop-filter", "blur(14px)");
+    }
     const reportEl = h("div");
     const listEl = h("div");
     body.append(bar, reportEl, listEl);
     let items = [];
-    let busy = false;
     const barButtons = {};
 
     // 批量总结失败报告:按错误信息分组展示,比一闪而过的 toast 更可靠
@@ -1029,7 +1050,7 @@
       }, n ? `已选 ${n} 项` : "批量操作"));
 
       const allBox = mkCheckbox(items.length > 0 && items.every((it) => selectedIds.has(it.id)));
-      allBox.disabled = busy || !items.length;
+      allBox.disabled = batchBusy || !items.length;
       allBox.addEventListener("change", () => {
         for (const it of items) {
           if (allBox.checked) selectedIds.add(it.id);
@@ -1051,28 +1072,33 @@
       ];
       for (const [key, label, color, fn] of defs) {
         const b = mkBtn(label, color, false, fn);
-        b.disabled = busy || n === 0;
+        b.disabled = batchBusy || n === 0;
         b.style.opacity = b.disabled ? "0.55" : "";
         barButtons[key] = b;
         bar.append(b);
       }
+      // 批量进行中列表 Tab 被重建:把进度文案恢复到新按钮上
+      if (batchBusy && batchProgress && barButtons[batchProgress.btn]) {
+        barButtons[batchProgress.btn].textContent = batchProgress.text;
+      }
     }
 
     function clearSelection() {
-      if (busy) return;
+      if (batchBusy) return;
       selectedIds.clear();
       renderList();
       renderBar();
     }
 
     async function batchDelete() {
-      if (busy || !confirm(`确定删除选中的 ${selectedIds.size} 条?`)) return;
-      busy = true;
+      if (batchBusy || !confirm(`确定删除选中的 ${selectedIds.size} 条?`)) return;
+      batchBusy = true;
       renderBar();
       const ids = [...selectedIds];
       let ok = 0, fail = 0;
       for (let i = 0; i < ids.length; i++) {
-        barButtons.del.textContent = `删除中 ${i + 1}/${ids.length}…`;
+        batchProgress = { btn: "del", text: `删除中 ${i + 1}/${ids.length}…` };
+        barButtons.del.textContent = batchProgress.text;
         try {
           await gmFetch("DELETE", "/api/item/" + ids[i]);
           ok++;
@@ -1081,15 +1107,17 @@
           if (idx >= 0) savedLocal.splice(idx, 1);
         } catch { fail++; }
       }
-      busy = false;
+      batchBusy = false;
+      batchProgress = null;
       toast(fail ? `删除完成:成功 ${ok},失败 ${fail}` : `已删除 ${ok} 条 ✓`);
-      switchTab("list");
+      // 用户中途切走了就不强拽回列表页,回来时会看到刷新后的列表
+      if (currentTab === "list") switchTab("list");
     }
 
     // 只总结有正文且尚未总结的;无正文(B站链接)与已有总结的跳过
     // 逐条记录失败原因;连续 2 条相同错误视为系统性问题(模型不存在/密钥无效/限流),提前中止不再干等
     async function batchSummarize() {
-      if (busy) return;
+      if (batchBusy) return;
       const targets = items.filter((it) => selectedIds.has(it.id) && it.has_content && !it.has_summary);
       const skipped = selectedIds.size - targets.length;
       if (!targets.length) {
@@ -1100,12 +1128,13 @@
         `为 ${targets.length} 条生成 AI 总结?\n每条约 30~60 秒,期间请保持面板打开` +
         (skipped ? `\n(另有 ${skipped} 条无正文/已有总结,将跳过)` : ""),
       )) return;
-      busy = true;
+      batchBusy = true;
       renderBar();
       let ok = 0, streak = 0, lastMsg = "", aborted = false;
       const failures = [];
       for (let i = 0; i < targets.length; i++) {
-        barButtons.sum.textContent = `⏳ 总结中 ${i + 1}/${targets.length}`;
+        batchProgress = { btn: "sum", text: `⏳ 总结中 ${i + 1}/${targets.length}` };
+        barButtons.sum.textContent = batchProgress.text;
         try {
           await gmFetch("POST", "/api/summarize", { id: targets[i].id });
           ok++;
@@ -1116,7 +1145,8 @@
           if (streak >= 2) { aborted = true; break; }
         }
       }
-      busy = false;
+      batchBusy = false;
+      batchProgress = null;
       const remain = aborted ? targets.length - ok - failures.length : 0;
       batchReport = { failures, aborted, remain };
       toast(
@@ -1127,15 +1157,17 @@
         (failures.length ? ",失败原因见列表顶部报告" : ""),
         failures.length > 0,
       );
-      switchTab("list");
+      // 用户中途切走了就不强拽回列表页,失败报告会在下次进列表时显示
+      if (currentTab === "list") switchTab("list");
     }
 
     // 所选合并导出为一个 markdown(多条逐个下载会被浏览器拦截)
     async function batchDownload() {
-      if (busy) return;
-      busy = true;
+      if (batchBusy) return;
+      batchBusy = true;
       renderBar();
-      barButtons.dl.textContent = "打包中…";
+      batchProgress = { btn: "dl", text: "打包中…" };
+      barButtons.dl.textContent = batchProgress.text;
       try {
         const { items: fullItems } = await gmFetch("GET", "/api/items?full=1");
         const byId = new Map(fullItems.map((x) => [x.id, x]));
@@ -1149,7 +1181,8 @@
       } catch (e) {
         toast("导出失败: " + e.message, true);
       }
-      busy = false;
+      batchBusy = false;
+      batchProgress = null;
       renderBar();
     }
 
@@ -1231,7 +1264,7 @@
     Promise.resolve(local ? local : gmFetch("GET", "/api/item/" + id))
       .then((it) => {
         const detail = h("div", { padding: "10px", background: C.bg2, "border-bottom": `1px solid ${C.border}` });
-        if (ANIM.slide) detail.setAttribute("data-wi-anim", "slide");
+        playAnim(detail, "slide");
         detail._detail = true;
 
         const summaryBox = h("div", {
@@ -1404,23 +1437,32 @@
     const loadCfg = mkBtn("读取云端 LLM 配置", () => {
       $storage.set("worker", workerInput.value.trim());
       $storage.set("token", tokenInput.value.trim());
+      loadCfg.disabled = true;
+      loadCfg.textContent = "读取中…";
       gmFetch("GET", "/api/settings")
         .then((s) => {
           apiBaseInput.value = s.api_base || "";
           modelInput.value = s.model || "";
           apiKeyInput.value = "";
           apiKeyInput.placeholder = s.api_key_masked ? `当前: ${s.api_key_masked}(不改则保留)` : "sk-…";
-          // 读到配置后自动拉一次模型列表,免去每次手动刷新;失败不影响配置读取结果
+          toast("已读取云端配置 ✓"); // 先反馈配置结果,不等模型列表(可能挂到 120s 超时)
+          // 随后自动拉一次模型列表,免去每次手动刷新;失败不影响配置读取结果
           return doRefreshModels(true)
             .then((n) => toast(`已读取云端配置 ✓ 模型列表已更新(${n} 个)`))
             .catch(() => toast("已读取云端配置 ✓(模型列表拉取失败,可点「刷新模型列表」重试)", true));
         })
-        .catch((e) => toast(e.message, true));
+        .catch((e) => toast(e.message, true))
+        .finally(() => {
+          loadCfg.disabled = false;
+          loadCfg.textContent = "读取云端 LLM 配置";
+        });
     });
 
     const saveCfg = mkBtn("保存 LLM 配置到云端", C.accent, true, () => {
       $storage.set("worker", workerInput.value.trim());
       $storage.set("token", tokenInput.value.trim());
+      saveCfg.disabled = true;
+      saveCfg.textContent = "保存中…";
       gmFetch("POST", "/api/settings", {
         api_base: apiBaseInput.value.trim(),
         api_key: apiKeyInput.value.trim(),
@@ -1429,15 +1471,28 @@
         .then((s) => {
           apiKeyInput.value = "";
           apiKeyInput.placeholder = s.api_key_masked ? `当前: ${s.api_key_masked}` : "";
+          toast("LLM 配置已保存 ✓");
           return doRefreshModels(true)
             .then((n) => toast(`LLM 配置已保存 ✓ 模型列表已更新(${n} 个)`))
             .catch(() => toast("LLM 配置已保存 ✓(模型列表拉取失败,可手动刷新)", true));
         })
-        .catch((e) => toast(e.message, true));
+        .catch((e) => toast(e.message, true))
+        .finally(() => {
+          saveCfg.disabled = false;
+          saveCfg.textContent = "保存 LLM 配置到云端";
+        });
     });
 
     const refreshModels = mkBtn("刷新模型列表", () => {
-      doRefreshModels(false).then((n) => toast(`已拉取 ${n} 个模型 ✓`)).catch(() => {});
+      refreshModels.disabled = true;
+      refreshModels.textContent = "拉取中…";
+      doRefreshModels(false)
+        .then((n) => toast(`已拉取 ${n} 个模型 ✓`))
+        .catch(() => {})
+        .finally(() => {
+          refreshModels.disabled = false;
+          refreshModels.textContent = "刷新模型列表";
+        });
     });
 
     body.append(
