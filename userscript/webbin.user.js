@@ -3,7 +3,7 @@
 // @name:en      Webbin Saver
 // @description  保存网页正文/B站视频到自己的 Cloudflare Worker,双端 Edge 可用;B站视频可抓取字幕/评论,AI 总结、历史查看、下载归档
 // @namespace    https://github.com/local/webbin
-// @version      0.7.5
+// @version      0.7.6
 // @updateURL    /userscript.user.js
 // @author       you
 // @match        *://*/*
@@ -655,7 +655,7 @@
     return base ? base + "/userscript.user.js" : "";
   };
   const SCRIPT_VERSION =
-    (typeof GM_info !== "undefined" && GM_info.script && GM_info.script.version) || "0.7.5";
+    (typeof GM_info !== "undefined" && GM_info.script && GM_info.script.version) || "0.7.6";
   let versionCache = null;
 
   function renderVersionFooter(el, v) {
@@ -809,7 +809,7 @@
       "white-space": "pre-wrap", "font-size": "13px", color: C.sub,
     }, vp
       ? "「保存字幕」抓取 CC/AI 字幕,「保存评论」按热度抓前 100 条;抓到后自动保存进收集箱。"
-      : "点击「提取正文预览」查看将保存的内容");
+      : "点「保存到收集箱」会自动提取正文并保存,无需先预览;也可先「提取正文预览」查看。");
 
     // 视频页动作:抓取 → 直接保存;用户改过标题则沿用,否则用「视频名 · 字幕/热门评论」
     async function runBiliAction(btn, label, busy, action) {
@@ -876,8 +876,7 @@
       body.append(
         h("div", { "font-weight": "600", "margin-bottom": "8px" }, "标题"),
         titleInput,
-        h("div", { display: "flex", gap: "8px", "margin-top": "10px" }, subBtn, cmtBtn),
-        h("div", { "margin-top": "8px" }, linkBtn),
+        h("div", { display: "flex", gap: "8px", "margin-top": "10px", "flex-wrap": "wrap" }, subBtn, cmtBtn, linkBtn),
         preview,
         h("div", { "margin-top": "10px", "font-size": "12px", color: C.sub },
           "检测到 B 站视频页:字幕/评论直接抓进收集箱,双端可看、可生成 AI 总结;「仅存链接」保持原行为,由 PC 归档脚本处理。AI 字幕需要在浏览器登录 B 站。"),
@@ -886,7 +885,8 @@
     }
 
     const result = { lines: null, title: null };
-    const extractBtn = mkBtn("提取正文预览", () => {
+    // 提取正文并同步预览区;「保存」前会自动调用,也可手动预览
+    const extractAndPreview = () => {
       const r = extractArticle();
       result.lines = r.lines;
       result.title = r.title;
@@ -898,19 +898,24 @@
         (r.lines.length ? r.lines.slice(0, 60).join("\n") + stat : "未能提取到正文"),
       );
       preview.style.color = C.text;
-    });
+      return r;
+    };
+    const extractBtn = mkBtn("提取正文预览", extractAndPreview);
 
+    // 与 B 站一致的直接保存:未预览过则先自动提取,一步到位
     const saveBtn = mkBtn("保存到收集箱", C.accent, true, async () => {
       if (bili) {
         await saveLink(saveBtn);
         return;
       }
-      if (!result.lines) {
-        toast("请先提取正文预览");
-        return;
-      }
       saveBtn.disabled = true;
       try {
+        if (!result.lines) {
+          saveBtn.textContent = "⏳ 提取正文中…";
+          const r = extractAndPreview();
+          if (!r.lines.length) toast("未提取到正文,仅保存链接");
+        }
+        saveBtn.textContent = "⏳ 保存中…";
         const saved = await gmFetch("POST", "/api/save", {
           url: location.href.split("#")[0],
           title: titleInput.value.trim() || location.href,
@@ -924,17 +929,18 @@
         toast("保存失败: " + e.message, true);
       }
       saveBtn.disabled = false;
+      saveBtn.textContent = "保存到收集箱";
     });
 
     const hint = h("div", { "margin-top": "10px", "font-size": "12px", color: C.sub },
       bili
         ? "检测到 B 站页面(番剧/短链等):只保存链接,PC 归档脚本会自动下载字幕并生成总结。"
-        : "保存的是提取后的正文(Readability),不是整个页面;PC 归档脚本会把它落盘为 markdown。");
+        : "保存的是自动提取的正文(Readability),不是整个页面;PC 归档脚本会把它落盘为 markdown。");
 
     body.append(
       h("div", { "font-weight": "600", "margin-bottom": "8px" }, "标题"),
       titleInput,
-      bili ? "" : h("div", { display: "flex", gap: "8px", "margin-top": "10px" }, extractBtn, saveBtn),
+      bili ? "" : h("div", { display: "flex", gap: "8px", "margin-top": "10px", "flex-wrap": "wrap" }, saveBtn, extractBtn),
       bili ? h("div", { "margin-top": "10px" }, saveBtn) : "",
       preview,
       hint,
