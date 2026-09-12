@@ -3,7 +3,7 @@
 // @name:en      Webbin Saver
 // @description  保存网页正文/B站视频到自己的 Cloudflare Worker,双端 Edge 可用;B站视频可抓取字幕/评论,AI 总结、历史查看、下载归档
 // @namespace    https://github.com/local/webbin
-// @version      0.7.6
+// @version      0.7.7
 // @updateURL    /userscript.user.js
 // @author       you
 // @match        *://*/*
@@ -655,7 +655,7 @@
     return base ? base + "/userscript.user.js" : "";
   };
   const SCRIPT_VERSION =
-    (typeof GM_info !== "undefined" && GM_info.script && GM_info.script.version) || "0.7.6";
+    (typeof GM_info !== "undefined" && GM_info.script && GM_info.script.version) || "0.7.7";
   let versionCache = null;
 
   function renderVersionFooter(el, v) {
@@ -956,9 +956,15 @@
 
   function buildListTab(body) {
     // 常驻批量栏:未选择时按钮置灰而不是隐藏,避免出现/消失导致列表跳动
+    // 负 margin 铺满滚动区整个顶部(含 body 内边距区),钉住时从最顶端盖住,内容只会从栏下方滑过
+    // 半透明 + backdrop-filter 毛玻璃:滑过的内容被虚化,不再露缝
     const bar = h("div", {
-      display: "flex", position: "sticky", top: "0", "z-index": "2",
-      background: C.bg, padding: "8px 0", "border-bottom": `1px solid ${C.border}`,
+      display: "flex", position: "sticky", top: "0", "z-index": "3",
+      background: DARK ? "rgba(30,31,36,0.78)" : "rgba(255,255,255,0.78)",
+      backdropFilter: "blur(14px)",
+      WebkitBackdropFilter: "blur(14px)",
+      padding: "8px 14px", margin: "-14px -14px 8px",
+      "border-bottom": `1px solid ${C.border}`,
       "align-items": "center", gap: "8px", "flex-wrap": "wrap",
     });
     const reportEl = h("div");
