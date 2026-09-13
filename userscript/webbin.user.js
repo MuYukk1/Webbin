@@ -3,7 +3,7 @@
 // @name:en      Webbin Saver
 // @description  保存网页正文/B站视频到自己的 Cloudflare Worker,双端 Edge 可用;B站视频可抓取字幕/评论,AI 总结、分组管理与知识库对话(工具调用 Agent)、下载归档
 // @namespace    https://github.com/local/webbin
-// @version      0.8.11
+// @version      0.8.12
 // @updateURL    /userscript.user.js
 // @author       you
 // @match        *://*/*
@@ -697,7 +697,7 @@
     return base ? base + "/userscript.user.js" : "";
   };
   const SCRIPT_VERSION =
-    (typeof GM_info !== "undefined" && GM_info.script && GM_info.script.version) || "0.8.11";
+    (typeof GM_info !== "undefined" && GM_info.script && GM_info.script.version) || "0.8.12";
   let versionCache = null;
 
   function renderVersionFooter(el, v) {
@@ -1793,6 +1793,7 @@
     input: "",       // 输入框草稿
     view: "chat",    // chat | history(历史会话列表)
     historyId: "",   // 当前会话对应的历史条目 id:载入历史后继续聊,归档时原地更新那条而不是新增
+    kbGroups: [],    // 知识库分组列表(来自 /api/groups):持久化一份,分组接口慢/失败时默认范围不至于漏组
   };
 
   function saveChatState() {
@@ -1801,10 +1802,11 @@
         mode: chat.mode,
         groups: chat.groups,
         itemIds: chat.itemIds,
-        messages: chat.messages.slice(-60), // 会话上限 60 条,超出丢最旧
+        messages: tailMessages(chat.messages, 60), // 会话上限 60 条,超出丢最旧(切点避开孤儿 tool)
         model: chat.model,
         running: chat.running,
         historyId: chat.historyId,
+        kbGroups: chat.kbGroups,
         saved_at: Date.now(),
       });
     } catch { /* 存储满时放弃持久化,内存态不受影响 */ }
@@ -1820,9 +1822,30 @@
     chat.messages = s.messages;
     chat.model = typeof s.model === "string" ? s.model : "";
     chat.historyId = typeof s.historyId === "string" ? s.historyId : "";
+    chat.kbGroups = Array.isArray(s.kbGroups) ? s.kbGroups : [];
     // 0.8.4 及之前 h() 未设置 option 的 value,下拉占位文本曾被误存为模型名
     if (chat.model === "模型:跟随设置" || chat.model === "← 点击下方「刷新模型列表」或先手动保存 api_base") chat.model = "";
     return s.running === true;
+  }
+
+  // 取最后 cap 条消息,起点不落在孤儿 tool 消息上:tool 必须紧跟其 assistant tool_calls,否则恢复后的序列发给 API 会报错
+  function tailMessages(msgs, cap) {
+    let cut = Math.max(0, msgs.length - cap);
+    while (cut < msgs.length && msgs[cut].role === "tool") cut++;
+    return msgs.slice(cut);
+  }
+
+  // 内存态裁剪(与落盘 60 条一致):超长会话 renderChat 全量重绘会越来越慢。
+  // 就地修改保留数组引用(运行中的循环持有 msgs);切点同样避开孤儿 tool
+  function trimChatMessages(msgs, cap) {
+    if (msgs.length <= cap) return;
+    const sys = msgs[0] && msgs[0].role === "system" ? msgs[0] : null;
+    let cut = msgs.length - cap + (sys ? 1 : 0);
+    while (cut < msgs.length && msgs[cut].role === "tool") cut++;
+    const rest = msgs.slice(cut);
+    msgs.length = 0;
+    if (sys) msgs.push(sys);
+    msgs.push(...rest);
   }
 
   function resetChatSession() {
@@ -1860,7 +1883,7 @@
       groups: [...chat.groups],
       itemIds: [...chat.itemIds],
       model: chat.model,
-      messages: chat.messages.slice(-60),
+      messages: tailMessages(chat.messages, 60), // 上限 60 条,切点避开孤儿 tool
     };
     const list = loadChatHistory();
     if (chat.historyId) {
@@ -2118,6 +2141,7 @@
     chat.abort = false;
     chatAbort = null;
     if (stopReason) msgs.push({ role: "assistant", content: `— ${stopReason}。可缩小范围继续提问,或点「新会话」。` });
+    trimChatMessages(msgs, 60); // 内存态同样封顶:超长会话全量重绘会越来越慢
     saveChatState();
     renderChat();
   }
@@ -2499,7 +2523,11 @@
           listBox.append(h("div", { "font-size": "11px", color: C.sub, padding: "4px 6px" }, "仅显示前 200 条,请用搜索缩小范围"));
         }
       };
-      search.addEventListener("input", renderList);
+      let searchTimer = null;
+      search.addEventListener("input", () => { // 150ms 防抖:大库里每个按键都全量过滤会卡
+        clearTimeout(searchTimer);
+        searchTimer = setTimeout(renderList, 150);
+      });
       renderList();
     }
 
@@ -2514,7 +2542,11 @@
 
     function refreshGroups() {
       return gmFetch("GET", "/api/groups")
-        .then(({ groups }) => { chat.kbGroups = groups.filter((g) => !g.builtin); renderScope(); })
+        .then(({ groups }) => {
+          chat.kbGroups = groups.filter((g) => !g.builtin);
+          saveChatState(); // 分组缓存落盘:下次打开/接口失败时默认范围不漏组
+          renderScope();
+        })
         .catch((e) => toast("分组加载失败: " + e.message, true));
     }
 
@@ -2633,10 +2665,12 @@
     renderTop();
     renderScope();
     renderChat();
-    // 元数据按需加载(缓存 24h);分组列表拉取后渲染范围
+    // 元数据按需加载(缓存 24h);默认范围只在分组列表就绪后决策——
+    // 此前 loadKbMeta 先返回就会拿空 kbGroups 全选,自定义分组被静默漏掉,像在跟全库聊实际少了内容
     loadKbMeta(false, (s) => { status.textContent = s; })
-      .then(() => { if (status.isConnected && !chat.running) status.textContent = ""; autoSelectScope(); renderScope(); })
+      .then(() => { if (status.isConnected && !chat.running) status.textContent = ""; renderScope(); })
       .catch((e) => toast("资料索引加载失败: " + e.message, true));
+    // refreshGroups 内部已 catch:接口失败也会走到 then,用持久化的 kbGroups 兜底决策
     refreshGroups().then(() => { autoSelectScope(); renderScope(); });
 
     // 首次使用/从未选过范围时,默认全选分组(范围=全库),打开即可提问,不需要先懂范围概念
