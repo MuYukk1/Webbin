@@ -3,7 +3,7 @@
 // @name:en      Webbin Saver
 // @description  保存网页正文/B站视频到自己的 Cloudflare Worker,双端 Edge 可用;B站视频可抓取字幕/评论,AI 总结、分组管理与知识库对话(工具调用 Agent)、下载归档
 // @namespace    https://github.com/local/webbin
-// @version      0.8.0
+// @version      0.8.1
 // @updateURL    /userscript.user.js
 // @author       you
 // @match        *://*/*
@@ -679,7 +679,7 @@
     return base ? base + "/userscript.user.js" : "";
   };
   const SCRIPT_VERSION =
-    (typeof GM_info !== "undefined" && GM_info.script && GM_info.script.version) || "0.8.0";
+    (typeof GM_info !== "undefined" && GM_info.script && GM_info.script.version) || "0.8.1";
   let versionCache = null;
 
   function renderVersionFooter(el, v) {
@@ -1168,11 +1168,12 @@
         toast(`最多选 ${CHAT_LIMITS.maxSelected} 条直接对话,请缩小范围`, true);
         return;
       }
+      resetChatSession(); // 先归档上一段对话(此时仍是旧范围的元数据)
       chat.mode = "items";
       chat.itemIds = ids;
-      resetChatSession();
+      saveChatState();
       switchTab("chat");
-      toast(`新会话:已注入 ${ids.length} 条资料摘要`);
+      toast(`新会话:已注入 ${ids.length} 条资料摘要,上一会话已存入历史`);
     }
 
     function clearSelection() {
@@ -1703,6 +1704,7 @@
 
   const KB_META_KEY = "kb_meta_v2";
   const CHAT_SESSION_KEY = "chat_session_v1";
+  const CHAT_HISTORY_KEY = "chat_history_v1";
   // 预算默认值(工程建议值,交接文档 §6):到限即明确终态,不无限重试
   const CHAT_LIMITS = {
     modelCalls: 8,        // 单轮问答最多模型请求
@@ -1731,6 +1733,7 @@
     running: false,
     model: "",       // 空 = 跟随设置页模型
     input: "",       // 输入框草稿
+    view: "chat",    // chat | history(历史会话列表)
   };
 
   function saveChatState() {
@@ -1760,9 +1763,37 @@
   }
 
   function resetChatSession() {
+    archiveCurrentSession(); // 有实际对话内容才归档,新会话不丢上一段
     chat.messages = [];
     chat.running = false;
     saveChatState();
+  }
+
+  // ---- 历史会话:最多存 20 段,继续 = 载入为当前会话(从历史移除) ----
+  function loadChatHistory() {
+    const l = GM_getValue(CHAT_HISTORY_KEY, null);
+    return Array.isArray(l) ? l : [];
+  }
+
+  function saveChatHistory(list) {
+    try { GM_setValue(CHAT_HISTORY_KEY, list.slice(0, 20)); } catch { /* 满则放弃最旧之外的 */ }
+  }
+
+  function archiveCurrentSession() {
+    if (!chat.messages.some((m) => m.role === "user")) return;
+    const firstUser = chat.messages.find((m) => m.role === "user");
+    const list = loadChatHistory();
+    list.unshift({
+      id: Date.now().toString(36),
+      title: String(firstUser.content || "(无内容)").replace(/\s+/g, " ").slice(0, 40),
+      updated_at: Date.now(),
+      mode: chat.mode,
+      groups: [...chat.groups],
+      itemIds: [...chat.itemIds],
+      model: chat.model,
+      messages: chat.messages.slice(-60),
+    });
+    saveChatHistory(list);
   }
 
   function chatScopeIds() {
@@ -1978,7 +2009,21 @@
   // 会话渲染:user/assistant 气泡、工具状态行、引用来源;全部 textContent,资料内容不当 HTML
   function renderChat() {
     if (!chatDom || !chatDom.msgs.isConnected) return;
-    const { msgs, status, sendBtn, input } = chatDom;
+    const { msgs, status, sendBtn, input, composer } = chatDom;
+    // 发送/停止合一:空闲 = ➤ 发送,运行中 = ■ 停止
+    sendBtn.textContent = chat.running ? "■" : "➤";
+    sendBtn.style.setProperty("background", chat.running ? C.danger : C.accent);
+    sendBtn.title = chat.running ? "停止" : "发送";
+    if (historyBtnEl && historyBtnEl.isConnected) {
+      const n = loadChatHistory().length;
+      historyBtnEl.textContent = chat.view === "history" ? "返回对话" : (n ? `历史(${n})` : "历史");
+    }
+    if (chat.view === "history") {
+      composer.style.display = "none";
+      renderHistoryView(msgs, status);
+      return;
+    }
+    composer.style.display = "flex";
     msgs.replaceChildren();
     let refs = []; // 当前 assistant 回答的引用(自上一条回答后被 read 的条目)
     for (const m of chat.messages) {
@@ -2035,14 +2080,46 @@
         refs.push({ id: r.id, title: meta.title || r.title || r.id, url: meta.url || r.url || "" });
       }
     }
-    // 状态行(运行中/中断提示)
-    if (chat.running) status.textContent = "⏳ 助手工作中,可点「停止」中断…";
+    // 状态行(运行中/引导)
+    if (chat.running) status.textContent = "⏳ 助手工作中…";
     else if (chat.messages.length) status.textContent = "";
     else status.textContent = "选择范围后提问。助手会先搜索、再按需读取资料原文作答。";
-    sendBtn.textContent = chat.running ? "⏳ 回答中" : "发送";
-    sendBtn.disabled = chat.running;
-    input.disabled = chat.running;
     msgs.scrollTop = msgs.scrollHeight;
+  }
+
+  // 历史会话列表视图:继续 = 载入为当前会话(从历史移除);删除 = 移除记录
+  function renderHistoryView(msgs, status) {
+    msgs.replaceChildren();
+    const list = loadChatHistory();
+    status.textContent = list.length
+      ? "点「继续」把该会话载入为当前对话,可接着追问"
+      : "还没有历史会话。开始新会话时,上一段对话会自动存入这里。";
+    msgs.append(mkBtn("← 返回当前对话", undefined, false, () => { chat.view = "chat"; renderChat(); }));
+    for (const s of list) {
+      const cont = mkBtn("继续", C.accent, false, () => {
+        archiveCurrentSession(); // 当前对话若有内容先归档,再交换进来
+        chat.mode = s.mode === "items" ? "items" : "groups";
+        chat.groups = Array.isArray(s.groups) ? [...s.groups] : [];
+        chat.itemIds = Array.isArray(s.itemIds) ? [...s.itemIds] : [];
+        chat.model = s.model || "";
+        chat.messages = Array.isArray(s.messages) ? s.messages : [];
+        chat.view = "chat";
+        saveChatHistory(loadChatHistory().filter((x) => x.id !== s.id));
+        saveChatState();
+        renderMode(); renderChips(); renderChat();
+        toast(`已载入历史会话(${chat.messages.length} 条消息),可继续追问`);
+      });
+      const del = mkBtn("删除", C.danger, false, () => {
+        saveChatHistory(loadChatHistory().filter((x) => x.id !== s.id));
+        renderChat();
+      });
+      msgs.append(h("div", { display: "flex", "align-items": "center", gap: "8px", padding: "8px 4px", "border-bottom": `1px solid ${C.border}` },
+        h("div", { flex: "1", "min-width": "0" },
+          h("div", { "font-weight": "600", "font-size": "13px", overflow: "hidden", "text-overflow": "ellipsis", "white-space": "nowrap" }, s.title),
+          h("div", { "font-size": "11px", color: C.sub },
+            `${new Date(s.updated_at).toLocaleString("zh-CN", { hour12: false })} · ${s.messages.length} 条消息 · ${s.mode === "items" ? "按资料" : "按分组"}`)),
+        cont, del));
+    }
   }
 
   function buildChatTab(body) {
@@ -2067,8 +2144,8 @@
         }, label);
         b.addEventListener("click", () => {
           if (chat.mode === key) return;
+          resetChatSession(); // 先归档旧会话(带旧范围元数据),再切范围开始新会话
           chat.mode = key;
-          resetChatSession(); // 范围变更仅对新会话生效,避免旧范围资料残留
           toast("范围已切换,开始新会话");
           renderMode(); renderChips(); renderChat();
         });
@@ -2087,7 +2164,28 @@
         modelSel.value = chat.model;
       }
       modelSel.addEventListener("change", () => { chat.model = modelSel.value; saveChatState(); });
-      modeRow.append(modelSel);
+      // 顶栏小按钮:新会话(归档当前到历史)、历史列表、刷新索引
+      const mini = (label, fn, tip) => {
+        const b = h("button", {
+          padding: "3px 8px", "border-radius": "6px", cursor: "pointer", "font-size": "12px",
+          border: `1px solid ${C.border}`, background: "transparent", color: C.text,
+        }, label);
+        b.title = tip || label;
+        b.addEventListener("click", fn);
+        return b;
+      };
+      historyBtnEl = mini("历史", () => {
+        chat.view = chat.view === "history" ? "chat" : "history";
+        renderChat();
+      }, "查看以前的对话,可继续");
+      topBtns.reload = mini("⟳ 索引", onReloadIndex, "重新拉取资料索引:跨设备新增/修改/删组后用它同步");
+      topBtns.new = mini("新会话", onNewSession, "结束当前对话(自动存入历史)");
+      modeRow.append(
+        modelSel,
+        topBtns.new,
+        historyBtnEl,
+        topBtns.reload,
+      );
     }
 
     function renderChips() {
@@ -2152,37 +2250,57 @@
         if (!chat.running) chatSend().then(() => { input.value = chat.input || ""; });
       }
     });
-    const sendBtn = mkBtn("发送", C.accent, true, () => { chatSend().then(() => { input.value = chat.input || ""; }); });
-    const stopBtn = mkBtn("停止", C.danger, false, chatStop);
-    const newBtn = mkBtn("新会话", undefined, false, () => {
-      if (chat.running) return toast("请先停止当前回答", true);
-      resetChatSession();
-      renderChat();
-    });
-    const reloadBtn = mkBtn("刷新索引", undefined, false, () => {
-      reloadBtn.disabled = true;
-      loadKbMeta(true, (s) => { status.textContent = s; })
-        .then(() => { toast("资料索引已刷新 ✓"); renderChips(); })
-        .catch((e) => toast("索引刷新失败: " + e.message, true))
-        .finally(() => { reloadBtn.disabled = false; status.textContent = ""; });
+    // 发送/停止合一:空闲 ➤ 发送,运行中 ■ 停止(同一位置,状态由 renderChat 同步)
+    let historyBtnEl = null;
+    let topBtns = {}; // 顶栏 mini 按钮引用(刷新索引时禁用)
+    const sendBtn = h("button", {
+      width: "40px", height: "40px", "border-radius": "50%", cursor: "pointer",
+      border: "none", background: C.accent, color: "#fff", "font-size": "17px",
+      "flex-shrink": "0", "line-height": "1",
+    }, "➤");
+    sendBtn.title = "发送";
+    sendBtn.addEventListener("click", () => {
+      if (chat.running) return chatStop();
+      chatSend().then(() => { input.value = chat.input || ""; });
     });
     const composer = h("div", { display: "flex", gap: "8px", "align-items": "flex-end", "flex-shrink": "0" },
       h("div", { flex: "1" }, input),
-      h("div", { display: "flex", "flex-direction": "column", gap: "6px" },
-        h("div", { display: "flex", gap: "6px" }, sendBtn, stopBtn),
-        h("div", { display: "flex", gap: "6px" }, newBtn, reloadBtn)));
+      sendBtn);
+
+    // 顶栏按钮动作(渲染在 renderMode 的 mini 按钮上)
+    function onNewSession() {
+      if (chat.running) return toast("请先停止当前回答(■)", true);
+      resetChatSession(); // 当前对话自动归档到历史
+      chat.view = "chat";
+      renderChips();
+      renderChat();
+      toast("已开始新会话,上一段对话存入「历史」");
+    }
+    function onReloadIndex() {
+      reloadBtnLock(true);
+      loadKbMeta(true, (s) => { status.textContent = s; })
+        .then(() => { toast("资料索引已刷新 ✓"); renderChips(); })
+        .catch((e) => toast("索引刷新失败: " + e.message, true))
+        .finally(() => reloadBtnLock(false));
+    }
+    function reloadBtnLock(on) {
+      if (topBtns.reload) topBtns.reload.disabled = on;
+    }
 
     root.append(scopeCard, msgs, status, composer);
-    chatDom = { msgs, status, sendBtn, input };
+    chatDom = { msgs, status, sendBtn, input, composer };
 
-    renderMode();
-    renderChat();
+    // 先恢复持久化会话再渲染,否则重开面板时界面显示的是默认空状态
+    chat.view = "chat";
     const interrupted = loadChatState();
     if (interrupted) {
       chat.running = false;
       chat.messages.push({ role: "assistant", content: "— 上次会话运行中被中断(刷新/关页)。已恢复历史,可继续提问。" });
       saveChatState();
     }
+    renderMode();
+    renderChips();
+    renderChat();
     // 元数据按需加载(缓存 24h);分组列表拉取后渲染 chips
     loadKbMeta(false, (s) => { status.textContent = s; })
       .then(() => { if (status.isConnected && !chat.running) status.textContent = ""; renderChips(); })
