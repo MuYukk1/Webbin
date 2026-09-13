@@ -3,7 +3,7 @@
 // @name:en      Webbin Saver
 // @description  保存网页正文/B站视频到自己的 Cloudflare Worker,双端 Edge 可用;B站视频可抓取字幕/评论,AI 总结、分组管理与知识库对话(工具调用 Agent)、下载归档
 // @namespace    https://github.com/local/webbin
-// @version      0.8.2
+// @version      0.8.3
 // @updateURL    /userscript.user.js
 // @author       you
 // @match        *://*/*
@@ -686,7 +686,7 @@
     return base ? base + "/userscript.user.js" : "";
   };
   const SCRIPT_VERSION =
-    (typeof GM_info !== "undefined" && GM_info.script && GM_info.script.version) || "0.8.2";
+    (typeof GM_info !== "undefined" && GM_info.script && GM_info.script.version) || "0.8.3";
   let versionCache = null;
 
   function renderVersionFooter(el, v) {
@@ -1828,6 +1828,15 @@
     return ids;
   }
 
+  // 范围摘要文本(输入框左下角 chip 用)
+  function chatScopeLabel() {
+    if (chat.mode === "items") return "按资料:" + chat.itemIds.length + " 条";
+    const names = [];
+    const gl = [{ id: "default", name: "默认" }].concat(chat.kbGroups || []);
+    for (const g of gl) if (chat.groups.includes(g.id)) names.push(g.name);
+    return "按分组:" + (names.length ? names.join("+") : "未选");
+  }
+
   function chatSystemPrompt() {
     const n = chatScopeIds().size;
     return [
@@ -2022,7 +2031,13 @@
         break;
       }
     } catch (e) {
-      if (!chat.abort) chat.messages.push({ role: "assistant", content: "✗ 出错: " + e.message });
+      console.error("[webbin] chatSend 异常:", e);
+      let msg = e.message;
+      // 中转站按"是否支持工具调用"路由渠道,带 tools 的请求可能路由不到渠道;总结接口不带 tools 所以正常
+      if (/无可用渠道|no available channel|渠道|channel/i.test(msg)) {
+        msg += " —— 当前模型可能没有支持工具调用的渠道,请在顶部下拉里换一个模型再试";
+      }
+      if (!chat.abort) chat.messages.push({ role: "assistant", content: "✗ 出错: " + msg });
       stopReason = chat.abort ? "已手动停止" : "出错终止";
     }
     chat.running = false;
@@ -2294,6 +2309,11 @@
       padding: "4px 10px", "border-radius": "14px", cursor: "pointer", "font-size": "12px",
       border: "1px solid " + C.border, background: C.bg, color: C.sub,
       "max-width": "80%", overflow: "hidden", "text-overflow": "ellipsis", "white-space": "nowrap",
+    });
+    scopeChip.title = "展开/收起知识库范围选择";
+    scopeChip.addEventListener("click", () => {
+      scopeOpen = !scopeOpen;
+      scopeCard.style.display = scopeOpen ? "block" : "none";
     });
     scopeChip.title = "展开/收起知识库范围选择";
 
