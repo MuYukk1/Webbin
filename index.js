@@ -55,6 +55,17 @@ function itemGroupId(it) {
   return (it && it.group_id) || "default";
 }
 
+// 读侧归一化:分组被删除后,条目里残留的失效 group_id 按默认组解释(避免批量重写)
+function groupResolver(KV) {
+  return getGroups(KV).then((groups) => {
+    const valid = new Set(groups.map((g) => g.id));
+    return (it) => {
+      const g = itemGroupId(it);
+      return g === "default" || valid.has(g) ? g : "default";
+    };
+  });
+}
+
 async function callLLM(settings, system, user) {
   const base = settings.api_base.replace(/\/+$/, "");
   const resp = await fetch(base + "/chat/completions", {
@@ -151,6 +162,7 @@ export default {
     // ---- 列表 ----
     if (path === "/api/items" && request.method === "GET") {
       const ids = await listItems(KV);
+      const resolveGroup = await groupResolver(KV);
       const items = [];
       for (const id of ids) {
         const it = await KV.get("item:" + id, "json");
@@ -165,7 +177,7 @@ export default {
                 title: it.title,
                 site: it.site,
                 type: it.type,
-                group_id: itemGroupId(it),
+                group_id: resolveGroup(it),
                 created_at: it.created_at,
                 has_summary: !!it.summary,
                 has_content: !!it.content,
@@ -283,6 +295,7 @@ export default {
     // ---- 知识库检索元数据(有界分页;子请求受 Worker 限额约束,单页 ≤40 条) ----
     if (path === "/api/kb/metadata" && request.method === "GET") {
       const ids = (await listItems(KV)).sort(); // 按稳定 id 排序保证分页一致,客户端拿 created_at 自行排序
+      const resolveGroup = await groupResolver(KV);
       const offset = Math.max(0, parseInt(url.searchParams.get("cursor") || "0", 10) || 0);
       const limit = Math.min(40, Math.max(1, parseInt(url.searchParams.get("limit") || "25", 10) || 25));
       const page = ids.slice(offset, offset + limit);
@@ -295,7 +308,7 @@ export default {
           title: it.title,
           site: it.site,
           type: it.type,
-          group_id: itemGroupId(it),
+          group_id: resolveGroup(it),
           created_at: it.created_at,
           has_content: !!it.content,
           summary: String(it.summary || "").slice(0, 2000),
