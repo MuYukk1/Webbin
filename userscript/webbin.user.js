@@ -3,7 +3,7 @@
 // @name:en      Webbin Saver
 // @description  保存网页正文/B站视频到自己的 Cloudflare Worker,双端 Edge 可用;B站视频可抓取字幕/评论,AI 总结、分组管理与知识库对话(工具调用 Agent)、下载归档
 // @namespace    https://github.com/local/webbin
-// @version      0.8.12
+// @version      0.8.13
 // @updateURL    /userscript.user.js
 // @author       you
 // @match        *://*/*
@@ -697,7 +697,7 @@
     return base ? base + "/userscript.user.js" : "";
   };
   const SCRIPT_VERSION =
-    (typeof GM_info !== "undefined" && GM_info.script && GM_info.script.version) || "0.8.12";
+    (typeof GM_info !== "undefined" && GM_info.script && GM_info.script.version) || "0.8.13";
   let versionCache = null;
 
   function renderVersionFooter(el, v) {
@@ -2370,7 +2370,7 @@
       topBtns.new = mini("新会话", onNewSession, "结束当前对话(自动存入历史)");
       topBtns.reload = mini("⟳ 索引", onReloadIndex, "重新拉取资料索引:跨设备新增/修改/删组后用它同步");
       topRow.append(topBtns.new, historyBtnEl, topBtns.reload);
-      syncModelSel(); // 模型下拉已移到底部输入区,顶栏只负责同步它的选中值与列表
+      updateModelBtn(); // 模型控件在底部输入区,顶栏只负责同步它的选中值与列表
     }
 
     // ---- 范围选择:分组/资料两个多选下拉,ZCode 风格融在输入框深色底行;面板向上弹(面板容器 overflow hidden) ----
@@ -2385,29 +2385,28 @@
       c.addEventListener("click", onClick);
       return c;
     };
-    const mkDrop = (key, title, align) => {
+    const mkDrop = (key, title) => {
       const label = h("span", { overflow: "hidden", "text-overflow": "ellipsis", "white-space": "nowrap" });
       const btn = h("button", {
-        display: "inline-flex", "align-items": "center", gap: "5px", "max-width": "100%", "min-width": "0",
+        display: "inline-flex", "align-items": "center", gap: "5px",
+        "max-width": "42%", "min-width": "0", overflow: "hidden",
         padding: "6px 8px", "border-radius": "8px", cursor: "pointer", "font-size": "12px",
         border: "none", background: "transparent", color: C.sub,
       }, label, h("span", { "flex-shrink": "0", "font-size": "10px" }, "▼"));
       btn.title = title;
-      // 面板向上弹(面板容器 overflow hidden,向下会被裁);靠右的下拉面板向左展开,避免溢出被裁边
+      // 面板锚定整个输入框(composer 设 relative):横跨输入框宽度、悬在底行上方,
+      // 不再按小按钮定位——按按钮定位在窄屏会跑出面板外(0.8.10 资料面板跳到屏幕左边的根因)
       const panel = h("div", {
-        position: "absolute", bottom: "calc(100% + 10px)",
-        left: align === "right" ? "auto" : "0",
-        right: align === "right" ? "0" : "auto",
-        width: "min(300px, 78vw)", "box-sizing": "border-box",
+        position: "absolute", left: "10px", right: "10px", bottom: "50px",
         background: C.bg, border: "1px solid " + C.border, "border-radius": "12px",
         "box-shadow": "0 10px 32px rgba(0,0,0,0.35)", padding: "10px",
+        "max-height": "min(430px, 55vh)", overflow: "auto",
         "z-index": "30", display: "none",
       });
       btn.addEventListener("click", (e) => { e.stopPropagation(); toggleDrop(key); });
       panel.addEventListener("click", (e) => e.stopPropagation()); // 点面板不算点外面,交给 document 关闭器区分
-      const wrap = h("div", { position: "relative", "min-width": "0", "flex-shrink": "1", display: "flex", "max-width": "42%" }, btn, panel);
       drops[key] = { btn, label, panel };
-      return wrap;
+      return btn;
     };
     function toggleDrop(key) {
       const show = openDrop !== key;
@@ -2529,7 +2528,36 @@
         searchTimer = setTimeout(renderList, 150);
       });
       renderList();
+    // 模型选择:与分组/资料一致的自绘下拉,替代原生 select(样式不可控、与整体风格脱节)
+    if (key === "model") {
+      const models = GM_getValue("models_cache", []);
+      const mkRow = (value, text) => {
+        const on = (chat.model || "") === value;
+        const row = h("div", {
+          display: "flex", "align-items": "center", gap: "8px", padding: "7px 8px",
+          "border-radius": "8px", cursor: "pointer", "font-size": "12px",
+          color: on ? C.accent : C.text,
+        },
+          h("span", { "flex-shrink": "0", width: "14px", "text-align": "center" }, on ? "✓" : ""),
+          h("span", { flex: "1", "min-width": "0", overflow: "hidden", "text-overflow": "ellipsis", "white-space": "nowrap" }, text));
+        row.addEventListener("mouseenter", () => row.style.setProperty("background", C.bg2));
+        row.addEventListener("mouseleave", () => row.style.setProperty("background", "transparent"));
+        row.addEventListener("click", () => {
+          chat.model = value;
+          saveChatState();
+          updateModelBtn();
+          renderDropPanel("model");
+        });
+        return row;
+      };
+      panel.append(mkRow("", "跟随设置(用设置页配置的模型)"));
+      for (const m of models) panel.append(mkRow(m, m));
+      if (!models.length) {
+        panel.append(h("div", { "font-size": "11px", color: C.sub, padding: "4px 2px" },
+          "暂无模型列表:去设置页保存 LLM 配置或点「刷新模型列表」,这里会自动出现"));
+      }
     }
+  }
 
     function renderScope() {
       const gl = [{ id: "default", name: "默认" }].concat(chat.kbGroups || []);
@@ -2572,29 +2600,18 @@
       }
     });
 
-    const groupsDropWrap = mkDrop("groups", "选择参与对话的分组,可多选");
-    const itemsDropWrap = mkDrop("items", "选择参与对话的资料,可多选搜索", "right");
+    const groupsBtn = mkDrop("groups", "选择参与对话的分组,可多选");
+    const itemsBtn = mkDrop("items", "选择参与对话的资料,可多选搜索");
+    const modelBtn = mkDrop("model", "选择本次对话使用的模型");
+    modelBtn.style.setProperty("margin-left", "auto"); // 模型控件顶到右侧,范围控件靠左
 
-    // 模型选择:ghost 样式融入深色输入区,列表来自设置页拉取后的缓存
-    const modelSel = h("select", {
-      "margin-left": "auto", "max-width": "40%", "min-width": "0", "flex-shrink": "1",
-      padding: "6px 4px", "border-radius": "8px", cursor: "pointer", "font-size": "12px",
-      border: "none", background: "transparent", color: C.sub,
-    });
-    modelSel.title = "本次对话使用的模型;留空 = 跟随设置页的模型";
-    modelSel.addEventListener("change", () => { chat.model = modelSel.value; saveChatState(); });
-    function syncModelSel() {
-      if (!modelSel.isConnected) return;
-      modelSel.replaceChildren(h("option", { value: "" }, "跟随设置"));
-      for (const m of GM_getValue("models_cache", [])) modelSel.append(h("option", { value: m }, m));
-      modelSel.value = chat.model || "";
-      if (!modelSel.value && chat.model) { // 恢复的手填模型不在缓存列表里
-        modelSel.append(h("option", { value: chat.model }, chat.model));
-        modelSel.value = chat.model;
-      }
+    // 模型按钮的选中值与列表同步;缓存为空或超过 1 小时时后台静默拉一次模型列表(失败不打扰)
+    function updateModelBtn() {
+      drops.model.label.textContent = chat.model || "跟随设置";
+      drops.model.btn.style.setProperty("color", chat.model ? C.text : C.sub);
+      if (openDrop === "model") renderDropPanel("model");
     }
-    syncModelSel();
-    // 缓存为空或超过 1 小时:后台静默拉一次模型列表,成功后原地填充下拉(失败不打扰)
+    updateModelBtn();
     const cachedAt = GM_getValue("models_cache_at", 0);
     if (!GM_getValue("models_cache", []).length || Date.now() - cachedAt > 3600000) {
       gmFetch("POST", "/api/models", {}, { timeout: 30000 })
@@ -2604,7 +2621,7 @@
               GM_setValue("models_cache", models);
               GM_setValue("models_cache_at", Date.now());
             } catch { /* 存储满忽略 */ }
-            syncModelSel();
+            updateModelBtn();
           }
         })
         .catch(() => { /* 静默:保持「跟随设置」,可去设置页手动刷新 */ });
@@ -2624,12 +2641,14 @@
     });
 
     const bottomRow = h("div", { display: "flex", "align-items": "center", gap: "2px", "margin-top": "2px" },
-      groupsDropWrap, itemsDropWrap, modelSel, sendBtn); // 模型 margin-left:auto 顶到右侧;两个范围下拉向左排
+      groupsBtn, itemsBtn, modelBtn, sendBtn); // 模型 margin-left:auto 顶到右侧;范围控件靠左
+    // 输入框是三个下拉面板的定位基准(relative):面板横跨输入框宽度、悬在底行上方,窄屏也不会跑出面板外
     const composer = h("div", {
-      display: "flex", "flex-direction": "column", // 纵向:上输入,下范围/发送(renderChat 只切 display,不动方向)
+      display: "flex", "flex-direction": "column", position: "relative",
       border: "1px solid " + C.border, background: C.bg2, "border-radius": "12px",
       padding: "8px 10px", "flex-shrink": "0",
     }, input, bottomRow);
+    composer.append(drops.groups.panel, drops.items.panel, drops.model.panel);
 
     // 顶栏按钮动作
     function onNewSession() {
