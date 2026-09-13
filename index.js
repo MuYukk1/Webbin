@@ -45,6 +45,16 @@ async function getSettings(KV) {
   return s || { api_base: "", api_key: "", model: "" };
 }
 
+// 自定义分组列表(KV key "groups" → [{id,name}]);默认组 id 固定 "default",不入列表、不可删改
+async function getGroups(KV) {
+  const g = await KV.get("groups", "json");
+  return Array.isArray(g) ? g : [];
+}
+
+function itemGroupId(it) {
+  return (it && it.group_id) || "default";
+}
+
 async function callLLM(settings, system, user) {
   const base = settings.api_base.replace(/\/+$/, "");
   const resp = await fetch(base + "/chat/completions", {
@@ -113,6 +123,12 @@ export default {
       const body = await request.json();
       const urlStr = String(body.url || "").trim();
       if (!/^https?:\/\//.test(urlStr)) return bad("url 不合法");
+      // 可选 group_id:给非默认值时校验存在性,旧客户端不传则入默认组
+      let gid = "default";
+      if (body.group_id && body.group_id !== "default") {
+        const groups = await getGroups(KV);
+        if (groups.some((g) => g.id === body.group_id)) gid = body.group_id;
+      }
       const item = {
         id: newId(),
         url: urlStr,
@@ -120,6 +136,7 @@ export default {
         site: String(body.site || new URL(urlStr).hostname),
         type: body.type === "bilibili" ? "bilibili" : "web",
         content: String(body.content || ""),
+        group_id: gid,
         created_at: Date.now(),
         summary: "",
         summarized_at: 0,
@@ -148,6 +165,7 @@ export default {
                 title: it.title,
                 site: it.site,
                 type: it.type,
+                group_id: itemGroupId(it),
                 created_at: it.created_at,
                 has_summary: !!it.summary,
                 has_content: !!it.content,
@@ -205,6 +223,124 @@ export default {
       }
       await KV.put("item:" + body.id, JSON.stringify(it));
       return json({ ok: true });
+    }
+
+    // ---- 分组管理 ----
+    if (path === "/api/groups" && request.method === "GET") {
+      return json({ groups: [{ id: "default", name: "默认", builtin: true }, ...await getGroups(KV)] });
+    }
+    if (path === "/api/groups" && request.method === "POST") {
+      const body = await request.json();
+      const groups = await getGroups(KV);
+      const name = String(body.name || "").trim().slice(0, 50);
+      if (body.action === "create") {
+        if (!name) return bad("分组名不能为空");
+        if (name === "默认") return bad("不能使用保留名「默认」");
+        if (groups.length >= 50) return bad("分组数量已达上限(50)");
+        if (groups.some((g) => g.name === name)) return bad("分组名已存在");
+        groups.push({ id: newId(), name });
+        await KV.put("groups", JSON.stringify(groups));
+        return json({ ok: true });
+      }
+      if (body.action === "rename") {
+        const g = groups.find((x) => x.id === body.id);
+        if (!g) return bad("分组不存在");
+        if (!name || name === "默认" || (name !== g.name && groups.some((x) => x.name === name)))
+          return bad("分组名不可用");
+        g.name = name;
+        await KV.put("groups", JSON.stringify(groups));
+        return json({ ok: true });
+      }
+      if (body.action === "delete") {
+        // 资料保留原 group_id,读取时按默认组解释,避免批量重写
+        const next = groups.filter((x) => x.id !== body.id);
+        if (next.length === groups.length) return bad("分组不存在");
+        await KV.put("groups", JSON.stringify(next));
+        return json({ ok: true });
+      }
+      return bad("未知操作");
+    }
+
+    // 批量移动资料到分组(旧条目缺 group_id 视为默认组,此处显式写入)
+    if (path === "/api/group/assign" && request.method === "POST") {
+      const body = await request.json();
+      const ids = Array.isArray(body.ids) ? body.ids.filter((x) => typeof x === "string") : [];
+      if (!ids.length || ids.length > 200) return bad("ids 不合法(1~200 条)");
+      const groups = await getGroups(KV);
+      const gid = body.group_id === "default" ? "default" : (groups.find((g) => g.id === body.group_id) || {}).id;
+      if (!gid) return bad("目标分组不存在");
+      let ok = 0, fail = 0;
+      for (const id of ids) {
+        const it = await KV.get("item:" + id, "json");
+        if (!it) { fail++; continue; }
+        it.group_id = gid;
+        await KV.put("item:" + id, JSON.stringify(it));
+        ok++;
+      }
+      return json({ ok, fail });
+    }
+
+    // ---- 知识库检索元数据(有界分页;子请求受 Worker 限额约束,单页 ≤40 条) ----
+    if (path === "/api/kb/metadata" && request.method === "GET") {
+      const ids = (await listItems(KV)).sort(); // 按稳定 id 排序保证分页一致,客户端拿 created_at 自行排序
+      const offset = Math.max(0, parseInt(url.searchParams.get("cursor") || "0", 10) || 0);
+      const limit = Math.min(40, Math.max(1, parseInt(url.searchParams.get("limit") || "25", 10) || 25));
+      const page = ids.slice(offset, offset + limit);
+      const items = [];
+      for (const id of page) {
+        const it = await KV.get("item:" + id, "json");
+        if (!it) continue;
+        items.push({
+          id: it.id,
+          title: it.title,
+          site: it.site,
+          type: it.type,
+          group_id: itemGroupId(it),
+          created_at: it.created_at,
+          has_content: !!it.content,
+          summary: String(it.summary || "").slice(0, 2000),
+        });
+      }
+      const next = offset + page.length;
+      return json({ total: ids.length, items, next_cursor: next < ids.length ? String(next) : null });
+    }
+
+    // ---- 知识库对话代理(原生工具调用;messages 由油猴端组装,服务端只校验并转发) ----
+    if (path === "/api/chat" && request.method === "POST") {
+      const body = await request.json();
+      const msgs = Array.isArray(body.messages) ? body.messages : null;
+      if (!msgs || !msgs.length || msgs.length > 64) return bad("messages 不合法(1~64 条)");
+      for (const m of msgs) {
+        if (!m || !["system", "user", "assistant", "tool"].includes(m.role)) return bad("消息 role 不合法");
+        if (typeof m.content !== "string" || m.content.length > 200000) return bad("消息内容过大");
+        if (m.role === "tool" && typeof m.tool_call_id !== "string") return bad("tool 消息缺少 tool_call_id");
+      }
+      let tools = null;
+      if (body.tools != null) {
+        if (!Array.isArray(body.tools) || body.tools.length > 32) return bad("tools 不合法");
+        tools = body.tools;
+      }
+      const settings = await getSettings(KV);
+      if (!settings.api_base || !settings.api_key) return bad("请先在设置中配置 api_base / api_key");
+      const model = typeof body.model === "string" && body.model.trim() ? body.model.trim().slice(0, 200) : settings.model;
+      if (!model) return bad("未配置模型,请先在设置中选择模型");
+      const payload = { model, messages: msgs };
+      if (tools) payload.tools = tools;
+      if (JSON.stringify(payload).length > 600000) return bad("请求过大,请缩小对话范围或开新会话");
+      const base = settings.api_base.replace(/\/+$/, "");
+      try {
+        const resp = await fetch(base + "/chat/completions", {
+          method: "POST",
+          headers: { "content-type": "application/json", authorization: "Bearer " + settings.api_key },
+          body: JSON.stringify(payload),
+        });
+        const text = await resp.text();
+        if (!resp.ok) return bad(`模型接口返回 ${resp.status}: ${text.slice(0, 300)}`, 502);
+        // 透传原文,保留 assistant.tool_calls 等字段
+        return new Response(text, { status: 200, headers: JSON_HEADERS });
+      } catch (e) {
+        return bad("模型请求失败: " + e.message, 502);
+      }
     }
 
     // ---- LLM 设置 ----

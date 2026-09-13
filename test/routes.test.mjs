@@ -84,5 +84,62 @@ t("删除后列表为空", (await req("GET", "/api/items", null, "test-token")).
   t("userscript 响应头正确", (r.headers.get("content-type") || "").includes("text/javascript") && r.headers.get("cache-control") === "no-cache");
 }
 
+// ---- 分组 ----
+{
+  const aid = (await req("POST", "/api/save", { url: "https://example.com/grouped", title: "分组测试条目", content: "正文" }, "test-token")).data.id;
+  await req("POST", "/api/groups", { action: "create", name: "技术" }, "test-token");
+  t("重复分组名被拒", (await req("POST", "/api/groups", { action: "create", name: "技术" }, "test-token")).status === 400);
+  t("保留名「默认」被拒", (await req("POST", "/api/groups", { action: "create", name: "默认" }, "test-token")).status === 400);
+  const gl = await req("GET", "/api/groups", null, "test-token");
+  const tech = gl.data.groups.find((g) => g.name === "技术");
+  t("分组列表含默认组与新建组", gl.data.groups[0].id === "default" && !!tech);
+  t("分组接口需要鉴权", (await req("GET", "/api/groups", null)).status === 401);
+
+  const mv = await req("POST", "/api/group/assign", { ids: [aid], group_id: tech.id }, "test-token");
+  t("批量移动资料成功", mv.data.ok === 1 && mv.data.fail === 0);
+  const listAfter = await req("GET", "/api/items", null, "test-token");
+  t("列表返回 group_id", listAfter.data.items.find((x) => x.id === aid).group_id === tech.id);
+  t("移动到不存在的分组被拒", (await req("POST", "/api/group/assign", { ids: [aid], group_id: "nope" }, "test-token")).status === 400);
+  t("超量 ids 被拒", (await req("POST", "/api/group/assign", { ids: Array(201).fill(aid), group_id: "default" }, "test-token")).status === 400);
+
+  t("改名成功", (await req("POST", "/api/groups", { action: "rename", id: tech.id, name: "前端" }, "test-token")).data.ok === true);
+  t("删除分组成功", (await req("POST", "/api/groups", { action: "delete", id: tech.id }, "test-token")).data.ok === true);
+  const listStale = await req("GET", "/api/items", null, "test-token");
+  t("删除分组后失效 group_id 按默认组解释", listStale.data.items.find((x) => x.id === aid).group_id === "default");
+}
+
+// ---- 知识库元数据分页 ----
+{
+  await req("POST", "/api/save", { url: "https://example.com/b", title: "第二条", content: "x".repeat(3000), group_id: "default" }, "test-token");
+  const m1 = await req("GET", "/api/kb/metadata?limit=1", null, "test-token");
+  t("元数据分页返回 total 与游标", m1.data.total === 2 && m1.data.items.length === 1 && m1.data.next_cursor === "1");
+  t("元数据含摘要与分组、不含正文", typeof m1.data.items[0].summary === "string" && m1.data.items[0].group_id === "default" && !("content" in m1.data.items[0]));
+  t("metadata 需要鉴权", (await req("GET", "/api/kb/metadata", null)).status === 401);
+}
+
+// ---- 聊天代理 ----
+{
+  const realFetch = globalThis.fetch;
+  try {
+    await req("POST", "/api/settings", { api_base: "https://fake.llm/v1", api_key: "sk-1234567890", model: "m1" }, "test-token");
+    globalThis.fetch = async (u, init) => {
+      const sent = JSON.parse(init.body);
+      return new Response(JSON.stringify({
+        choices: [{ message: { role: "assistant", content: "回答", tool_calls: sent.tools ? [{ id: "t1", type: "function", function: { name: "search_kb", arguments: "{}" } }] : undefined } }],
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    };
+    const chat1 = await req("POST", "/api/chat", { messages: [{ role: "user", content: "你好" }] }, "test-token");
+    t("聊天代理透传响应", chat1.status === 200 && chat1.data.choices[0].message.content === "回答");
+    const chat2 = await req("POST", "/api/chat", { messages: [{ role: "user", content: "?" }], tools: [{ type: "function" }], model: "override-m" }, "test-token");
+    t("聊天代理透传 tool_calls 与模型覆盖", chat2.data.choices[0].message.tool_calls.length === 1);
+    t("空 messages 被拒", (await req("POST", "/api/chat", { messages: [] }, "test-token")).status === 400);
+    t("非法 role 被拒", (await req("POST", "/api/chat", { messages: [{ role: "admin", content: "x" }] }, "test-token")).status === 400);
+    t("tool 消息缺 tool_call_id 被拒", (await req("POST", "/api/chat", { messages: [{ role: "tool", content: "x" }] }, "test-token")).status === 400);
+    t("聊天接口需要鉴权", (await req("POST", "/api/chat", { messages: [{ role: "user", content: "x" }] })).status === 401);
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
