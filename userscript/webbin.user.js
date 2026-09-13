@@ -3,7 +3,7 @@
 // @name:en      Webbin Saver
 // @description  保存网页正文/B站视频到自己的 Cloudflare Worker,双端 Edge 可用;B站视频可抓取字幕/评论,AI 总结、分组管理与知识库对话(工具调用 Agent)、下载归档
 // @namespace    https://github.com/local/webbin
-// @version      0.8.10
+// @version      0.8.11
 // @updateURL    /userscript.user.js
 // @author       you
 // @match        *://*/*
@@ -697,7 +697,7 @@
     return base ? base + "/userscript.user.js" : "";
   };
   const SCRIPT_VERSION =
-    (typeof GM_info !== "undefined" && GM_info.script && GM_info.script.version) || "0.8.10";
+    (typeof GM_info !== "undefined" && GM_info.script && GM_info.script.version) || "0.8.11";
   let versionCache = null;
 
   function renderVersionFooter(el, v) {
@@ -1874,7 +1874,9 @@
         return;
       }
     }
-    entry.id = chat.historyId || Date.now().toString(36);
+    // 走到这里:historyId 为空,或指向已不存在(被删除/被挤出 20 条上限)的条目。
+    // 一律生成新 id:复用失效 id 会把用户刚删除的历史带完整内容"复活"
+    entry.id = Date.now().toString(36);
     chat.historyId = entry.id; // 记住归属,同一会话后续归档更新同一条
     list.unshift(entry);
     saveChatHistory(list);
@@ -2237,7 +2239,6 @@
     }
   }
 
-  // 历史会话列表视图:继续 = 载入为当前会话(从历史移除);删除 = 移除记录
   // 历史会话列表:点整张卡片即载入继续;删除两段式确认防误触;page 容器统一留白不贴边
   function renderHistoryView(msgs, status) {
     msgs.replaceChildren();
@@ -2257,6 +2258,11 @@
       card.addEventListener("mouseenter", () => card.style.setProperty("border-color", C.accent));
       card.addEventListener("mouseleave", () => card.style.setProperty("border-color", C.border));
       card.addEventListener("click", () => {
+        if (chat.historyId === s.id) { // 当前会话就是这条历史:直接回到对话,不归档不回滚(旧快照会覆盖掉新消息)
+          chat.view = "chat";
+          renderChat();
+          return;
+        }
         if (chat.running) { // 运行中先接管:与 resetChatSession 对齐,不等 abort 落地就交还控制权
           chat.abort = true;
           if (chatAbort) chatAbort.abort();
@@ -2296,7 +2302,10 @@
         }
         clearTimeout(armTimer);
         saveChatHistory(loadChatHistory().filter((x) => x.id !== s.id));
-        if (chat.historyId === s.id) chat.historyId = ""; // 删的就是当前会话的来源,清归属防归档时复活
+        if (chat.historyId === s.id) { // 删的就是当前会话的来源:清归属并落盘,防归档时复活
+          chat.historyId = "";
+          saveChatState();
+        }
         renderChat();
       });
       card.append(
@@ -2421,9 +2430,33 @@
         panel.append(row);
         return;
       }
-      // 资料多选:直接在面板里点选条目,搜索过滤;面板最多渲染 200 行防大库卡顿
+      // 资料多选:直接在面板里点选条目,搜索过滤;面板最多渲染前 200 行防大库卡顿
       panel.append(h("div", { "font-size": "11px", color: C.sub, "margin-bottom": "8px" },
         "点选要对话的资料;也可在「已保存」列表勾选后点「就这些聊」"));
+      // 已选条目固定显示在顶部(200 行窗口外/被搜索过滤掉的也能看到并反选)
+      if (chat.itemIds.length) {
+        const selRow = h("div", { display: "flex", gap: "6px", "flex-wrap": "wrap", "margin-bottom": "8px" });
+        for (const id of chat.itemIds) {
+          const meta = kbMeta ? kbMeta.items.find((it) => it.id === id) : null;
+          const name = (meta && meta.title) || (String(id).length > 12 ? String(id).slice(0, 12) + "…" : String(id));
+          const chip = h("button", {
+            display: "inline-flex", "align-items": "center", gap: "4px", "max-width": "100%", "min-width": "0",
+            padding: "3px 8px", "border-radius": "12px", cursor: "pointer", "font-size": "11px",
+            border: "1px solid " + C.accent, background: "transparent", color: C.accent,
+          },
+            h("span", { overflow: "hidden", "text-overflow": "ellipsis", "white-space": "nowrap" }, name),
+            h("span", { "flex-shrink": "0" }, "×"));
+          chip.title = "取消选择:" + name;
+          chip.addEventListener("click", () => {
+            chat.itemIds = chat.itemIds.filter((x) => x !== id);
+            saveChatState();
+            renderScope();
+            renderDropPanel("items"); // 重建已选行与列表勾选态
+          });
+          selRow.append(chip);
+        }
+        panel.append(selRow);
+      }
       const search = mkInput("", "搜索标题过滤");
       search.style.setProperty("padding", "6px 10px");
       search.style.setProperty("font-size", "12px");
