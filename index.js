@@ -339,7 +339,10 @@ export default {
       const model = typeof body.model === "string" && body.model.trim() ? body.model.trim().slice(0, 200) : settings.model;
       if (!model) return bad("未配置模型,请先在设置中选择模型");
       const payload = { model, messages: msgs };
-      if (tools) payload.tools = tools;
+      if (tools) {
+        payload.tools = tools;
+        payload.tool_choice = "auto"; // 显式声明,部分中转站不默认按 auto 处理
+      }
       if (JSON.stringify(payload).length > 600000) return bad("请求过大,请缩小对话范围或开新会话");
       const base = settings.api_base.replace(/\/+$/, "");
       try {
