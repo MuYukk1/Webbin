@@ -3,7 +3,7 @@
 // @name:en      Webbin Saver
 // @description  保存网页正文/B站视频到自己的 Cloudflare Worker,双端 Edge 可用;B站视频可抓取字幕/评论,AI 总结、分组管理与知识库对话(工具调用 Agent)、下载归档
 // @namespace    https://github.com/local/webbin
-// @version      0.8.7
+// @version      0.8.8
 // @updateURL    /userscript.user.js
 // @author       you
 // @match        *://*/*
@@ -697,7 +697,7 @@
     return base ? base + "/userscript.user.js" : "";
   };
   const SCRIPT_VERSION =
-    (typeof GM_info !== "undefined" && GM_info.script && GM_info.script.version) || "0.8.7";
+    (typeof GM_info !== "undefined" && GM_info.script && GM_info.script.version) || "0.8.8";
   let versionCache = null;
 
   function renderVersionFooter(el, v) {
@@ -1583,6 +1583,11 @@
           for (const m of models) modelSelect.append(h("option", { value: m }, m));
           if (current && models.includes(current)) modelSelect.value = current;
           if (current) modelInput.value = current;
+          // 同步给对话页的模型下拉(之前只填设置页下拉,对话下拉读的缓存永远为空)
+          try {
+            GM_setValue("models_cache", models);
+            GM_setValue("models_cache_at", Date.now());
+          } catch { /* 存储满忽略 */ }
           return models.length;
         })
         .catch((e) => { if (!silentFail) toast(e.message, true); throw e; });
@@ -1803,9 +1808,11 @@
   function resetChatSession() {
     archiveCurrentSession(); // 有实际对话内容才归档,新会话不丢上一段
     if (chat.running) {
-      // 运行中重置:中止在途模型请求,旧循环凭 runId 丢弃收尾,不会污染新会话
+      // 运行中重置:立即交还控制权,旧循环凭 runId 丢弃收尾
       chat.abort = true;
       if (chatAbort) chatAbort.abort();
+      chatRunId++;
+      chat.abort = false; // 旧循环 finalize 被跳过,abort 必须自己清,否则新会话首轮会被误判"已手动停止"
     }
     chat.messages = [];
     chat.running = false;
@@ -1935,7 +1942,7 @@
         return { ...x, url: meta ? meta.url : "" };
       });
       return Promise.resolve({
-        coverage: "标题+总结" + (kbBodyCache.size ? ";部分已读正文" : ""),
+        coverage: "标题+总结(正文需 read_item 确认)", // 不写"已读正文":缓存正文并不参与搜索,别误导模型
         note: "无命中不代表正文里没有答案,可 read_item 深入条目",
         hits: hitsWithUrl,
       });
@@ -2072,7 +2079,7 @@
       let msg = e.message;
       // 中转站按"是否支持工具调用"路由渠道,带 tools 的请求可能路由不到渠道;总结接口不带 tools 所以正常
       if (/无可用渠道|no available channel|渠道|channel/i.test(msg)) {
-        msg += " —— 当前模型可能没有支持工具调用的渠道,请在顶部下拉里换一个模型再试";
+        msg += " —— 当前模型可能没有支持工具调用的渠道,在输入框下方的模型下拉里换一个再试";
       }
       if (!chat.abort) msgs.push({ role: "assistant", content: "✗ 出错: " + msg });
       stopReason = chat.abort ? "已手动停止" : "出错终止";
@@ -2097,7 +2104,7 @@
   function renderChat() {
     try {
       if (!chatDom || !chatDom.msgs.isConnected) return;
-      const { msgs, status, sendBtn, input, composer, scopeChip } = chatDom;
+      const { msgs, status, sendBtn, input, composer, scopeChip, scopeCard } = chatDom;
       // 发送/停止合一:空闲 ➤ 发送,运行中 ■ 停止
       sendBtn.textContent = chat.running ? "■" : "➤";
       sendBtn.style.setProperty("background", chat.running ? C.danger : C.accent);
@@ -2108,10 +2115,12 @@
       }
       if (chat.view === "history") {
         composer.style.display = "none";
+        if (scopeCard) scopeCard.style.display = "none"; // 历史列表用不到范围选择,整卡藏掉
         renderHistoryView(msgs, status);
         return;
       }
       composer.style.display = "flex";
+      if (scopeCard) scopeCard.style.display = scopeCard.dataset.collapsed === "1" ? "none" : "block";
       msgs.replaceChildren();
       const seenIds = new Set(); // 本次渲染内的引用去重(渲染是全量重绘,按次收集)
       let refs = []; // 当前 assistant 回答的引用(自上一条回答后被 read 的条目)
@@ -2130,7 +2139,15 @@
             for (const tc of m.tool_calls) {
               const fn = tc.function || {};
               let label = fn.name || "工具";
-              try { const a = JSON.parse(fn.arguments || "{}"); if (a.query) label += ":" + a.query; if (a.item_id) label += ":" + a.item_id; } catch { /* 展示用,解析失败就显示原名 */ }
+              try {
+                const a = JSON.parse(fn.arguments || "{}");
+                if (a.query) label += ":" + a.query;
+                if (a.item_id) { // 引用显示条目标题而非裸 ID;索引未覆盖时退回 ID
+                  const meta = kbMeta ? kbMeta.items.find((it) => it.id === a.item_id) : null;
+                  const t = (meta && meta.title) || a.item_id;
+                  label += ":" + (t.length > 18 ? t.slice(0, 18) + "…" : t);
+                }
+              } catch { /* 展示用,解析失败就显示原名 */ }
               msgs.append(h("div", { "font-size": "11px", color: C.sub, margin: "4px 0" }, "🛠 " + label));
             }
             continue;
@@ -2193,9 +2210,12 @@
     msgs.append(mkBtn("← 返回当前对话", undefined, false, () => { chat.view = "chat"; renderChat(); }));
     for (const s of list) {
       const cont = mkBtn("继续", C.accent, false, () => {
-        if (chat.running) { // 运行中先接管:中止在途请求,旧循环凭 runId 丢弃收尾
+        if (chat.running) { // 运行中先接管:与 resetChatSession 对齐,不等 abort 落地就交还控制权
           chat.abort = true;
           if (chatAbort) chatAbort.abort();
+          chatRunId++; // 旧循环 finalize 被 runId 挡下,不会把收尾状态写进新会话
+          chat.abort = false; // finalize 被跳过,abort 自己清,避免新会话首轮误判"已手动停止"
+          chat.running = false; // 否则发送键停在 ■,载入后发不出问题
         }
         archiveCurrentSession(); // 当前对话若有内容先归档,再交换进来
         chat.mode = s.mode === "items" ? "items" : "groups";
@@ -2227,9 +2247,8 @@
     const root = h("div", { height: "100%", "box-sizing": "border-box", display: "flex", "flex-direction": "column" });
     body.append(root);
 
-    let scopeOpen = true;
 
-    // ---- 顶栏:模型选择 + 会话操作 ----
+    // ---- 顶栏:会话操作(模型选择已移至底部输入区) ----
     const topRow = h("div", { display: "flex", gap: "6px", "align-items": "center", "flex-wrap": "wrap", "flex-shrink": "0", padding: "2px 0 8px" });
 
     // ---- 范围卡(可折叠,展开于输入框上方) ----
@@ -2241,18 +2260,6 @@
 
     function renderTop() {
       topRow.replaceChildren();
-      const modelSel = h("select", {
-        flex: "1", "min-width": "0", "max-width": "55%", padding: "4px 6px", "border-radius": "6px",
-        border: "1px solid " + C.border, background: C.bg, color: C.text, "font-size": "12px",
-      });
-      modelSel.append(h("option", { value: "" }, "模型:跟随设置"));
-      for (const m of GM_getValue("models_cache", [])) modelSel.append(h("option", { value: m }, m));
-      modelSel.value = chat.model || "";
-      if (!modelSel.value && chat.model) { // 恢复的手填模型不在缓存列表里
-        modelSel.append(h("option", { value: chat.model }, chat.model));
-        modelSel.value = chat.model;
-      }
-      modelSel.addEventListener("change", () => { chat.model = modelSel.value; saveChatState(); });
       const mini = (label, fn, tip) => {
         const b = h("button", {
           padding: "4px 9px", "border-radius": "6px", cursor: "pointer", "font-size": "12px",
@@ -2268,7 +2275,8 @@
       }, "查看以前的对话,可继续");
       topBtns.new = mini("新会话", onNewSession, "结束当前对话(自动存入历史)");
       topBtns.reload = mini("⟳ 索引", onReloadIndex, "重新拉取资料索引:跨设备新增/修改/删组后用它同步");
-      topRow.append(modelSel, topBtns.new, historyBtnEl, topBtns.reload);
+      topRow.append(topBtns.new, historyBtnEl, topBtns.reload);
+      syncModelSel(); // 模型下拉已移到底部输入区,顶栏只负责同步它的选中值与列表
     }
 
     function renderScope() {
@@ -2353,17 +2361,54 @@
     });
 
     const scopeChip = h("button", {
+      flex: "1", "min-width": "0",
       display: "inline-flex", "align-items": "center", gap: "4px",
       padding: "4px 10px", "border-radius": "14px", cursor: "pointer", "font-size": "12px",
       border: "1px solid " + C.border, background: C.bg, color: C.sub,
-      "max-width": "80%", overflow: "hidden", "text-overflow": "ellipsis", "white-space": "nowrap",
+      overflow: "hidden", "text-overflow": "ellipsis", "white-space": "nowrap",
     });
     scopeChip.title = "展开/收起知识库范围选择";
-    scopeChip.addEventListener("click", () => {
-      scopeOpen = !scopeOpen;
-      scopeCard.style.display = scopeOpen ? "block" : "none";
+      scopeChip.addEventListener("click", () => {
+        // 折叠状态记在 dataset 上:renderChat 全量重绘时要按它恢复,历史视图藏卡后返回也不丢状态
+        const collapse = scopeCard.dataset.collapsed !== "1";
+        scopeCard.dataset.collapsed = collapse ? "1" : "0";
+        scopeCard.style.display = collapse ? "none" : "block";
+      });
+
+    // 模型选择(底部输入区,与范围 chip 同风格;列表来自设置页拉取后的缓存)
+    const modelSel = h("select", {
+      width: "9.5em", "min-width": "0", "max-width": "40%", "flex-shrink": "1",
+      padding: "4px 10px", "border-radius": "14px", cursor: "pointer", "font-size": "12px",
+      border: "1px solid " + C.border, background: C.bg, color: C.sub,
     });
-    scopeChip.title = "展开/收起知识库范围选择";
+    modelSel.title = "本次对话使用的模型;留空 = 跟随设置页的模型";
+    modelSel.addEventListener("change", () => { chat.model = modelSel.value; saveChatState(); });
+    function syncModelSel() {
+      if (!modelSel.isConnected) return;
+      modelSel.replaceChildren(h("option", { value: "" }, "跟随设置"));
+      for (const m of GM_getValue("models_cache", [])) modelSel.append(h("option", { value: m }, m));
+      modelSel.value = chat.model || "";
+      if (!modelSel.value && chat.model) { // 恢复的手填模型不在缓存列表里
+        modelSel.append(h("option", { value: chat.model }, chat.model));
+        modelSel.value = chat.model;
+      }
+    }
+    syncModelSel();
+    // 缓存为空或超过 1 小时:后台静默拉一次模型列表,成功后原地填充下拉(失败不打扰)
+    const cachedAt = GM_getValue("models_cache_at", 0);
+    if (!GM_getValue("models_cache", []).length || Date.now() - cachedAt > 3600000) {
+      gmFetch("POST", "/api/models", {}, { timeout: 30000 })
+        .then(({ models }) => {
+          if (Array.isArray(models) && models.length) {
+            try {
+              GM_setValue("models_cache", models);
+              GM_setValue("models_cache_at", Date.now());
+            } catch { /* 存储满忽略 */ }
+            syncModelSel();
+          }
+        })
+        .catch(() => { /* 静默:保持「跟随设置」,可去设置页手动刷新 */ });
+    }
 
     // 发送/停止合一:空闲 ➤ 发送,运行中 ■ 停止(同一位置,状态由 renderChat 同步)
     const sendBtn = h("button", {
@@ -2379,7 +2424,7 @@
     });
 
     const bottomRow = h("div", { display: "flex", "align-items": "center", gap: "8px", "margin-top": "4px" },
-      scopeChip, h("div", { flex: "1" }), sendBtn);
+      scopeChip, modelSel, sendBtn); // scopeChip flex:1 吸收剩余宽度;不放 spacer,免得把范围显示挤成省略号
     const composer = h("div", {
       display: "flex", "flex-direction": "column", // 纵向:上输入,下范围/发送(renderChat 只切 display,不动方向)
       border: "1px solid " + C.border, background: C.bg2, "border-radius": "12px",
@@ -2407,7 +2452,7 @@
     }
 
     root.append(topRow, msgs, status, scopeCard, composer);
-    chatDom = { msgs, status, sendBtn, input, composer, scopeChip, refresh: () => { renderTop(); renderScope(); } };
+    chatDom = { msgs, status, sendBtn, input, composer, scopeChip, scopeCard, refresh: () => { renderTop(); renderScope(); } };
 
     // 先恢复持久化会话再渲染,否则重开面板时界面显示的是默认空状态
     chat.view = "chat";
