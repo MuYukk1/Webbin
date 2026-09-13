@@ -3,7 +3,7 @@
 // @name:en      Webbin Saver
 // @description  保存网页正文/B站视频到自己的 Cloudflare Worker,双端 Edge 可用;B站视频可抓取字幕/评论,AI 总结、分组管理与知识库对话(工具调用 Agent)、下载归档
 // @namespace    https://github.com/local/webbin
-// @version      0.8.8
+// @version      0.8.9
 // @updateURL    /userscript.user.js
 // @author       you
 // @match        *://*/*
@@ -697,7 +697,7 @@
     return base ? base + "/userscript.user.js" : "";
   };
   const SCRIPT_VERSION =
-    (typeof GM_info !== "undefined" && GM_info.script && GM_info.script.version) || "0.8.8";
+    (typeof GM_info !== "undefined" && GM_info.script && GM_info.script.version) || "0.8.9";
   let versionCache = null;
 
   function renderVersionFooter(el, v) {
@@ -771,7 +771,22 @@
 
   let currentTab = null, tabButtons = {}, tabPages = {};
 
+  // 滚动条样式:只作用于面板内部([data-wi-ui] 后代),不污染宿主页面;webkit 系与 Firefox 各一份
+  function injectScrollbarStyle() {
+    if (document.getElementById("webbin-scrollbar-style")) return;
+    const st = document.createElement("style");
+    st.id = "webbin-scrollbar-style";
+    st.textContent =
+      "[data-wi-ui], [data-wi-ui] * { scrollbar-width: thin; scrollbar-color: " + C.border + " transparent; }" +
+      "[data-wi-ui] ::-webkit-scrollbar { width: 8px; height: 8px; }" +
+      "[data-wi-ui] ::-webkit-scrollbar-thumb { background: " + C.border + "; border-radius: 4px; }" +
+      "[data-wi-ui] ::-webkit-scrollbar-thumb:hover { background: " + C.sub + "; }" +
+      "[data-wi-ui] ::-webkit-scrollbar-track, [data-wi-ui] ::-webkit-scrollbar-corner { background: transparent; }";
+    document.head.append(st);
+  }
+
   function buildPanel() {
+    injectScrollbarStyle();
     const overlay = h("div", {
       position: "fixed", inset: "0", "z-index": "2147483645",
       background: "rgba(0,0,0,0.35)", display: "flex",
@@ -1672,7 +1687,7 @@
     body.append(
       field("Worker 地址", workerInput),
       field("Token", withEye(tokenInput)),
-      h("div", { display: "flex", gap: "8px", margin: "12px 0" }, saveLocal, testConn, loadCfg),
+      h("div", { display: "flex", gap: "8px", "flex-wrap": "wrap", margin: "12px 0" }, saveLocal, testConn, loadCfg),
       h("div", { height: "1px", background: C.border, margin: "12px 0" }),
       field("LLM API Base(OpenAI 兼容)", apiBaseInput),
       field("API Key(存服务端 KV,前端只回显掩码)", withEye(apiKeyInput)),
@@ -1901,11 +1916,12 @@
   }
 
   function kbReadFromCache(id, cursor, limit) {
-    const text = kbBodyCache.get(id) || "";
+    const cached = kbBodyCache.get(id) || { title: "", text: "" };
     // 单段上限 20000:防止模型传超大 limit 一次拉走整篇
     const size = Math.min(20000, Math.max(200, limit > 0 ? limit : CHAT_LIMITS.readChunk));
-    const c = chunkText(text, cursor, size);
-    return { id, total_chars: c.total, content: c.chunk, next_cursor: c.next_cursor, truncated: c.truncated };
+    const c = chunkText(cached.text, cursor, size);
+    // title 随结果返回:渲染引用行不依赖 kbMeta 索引是否就绪
+    return { id, title: cached.title, total_chars: c.total, content: c.chunk, next_cursor: c.next_cursor, truncated: c.truncated };
   }
 
   // 工具执行:范围由应用注入快照,模型参数只影响分页/搜索词;越界 ID 直接拒绝
@@ -1959,7 +1975,7 @@
           source = "总结(无正文)";
         }
         const text = body ? `《${it.title}》(${source})\n${body}` : "";
-        kbBodyCache.set(id, text); // 空文本也缓存,避免重复拉取
+        kbBodyCache.set(id, { title: it.title, text }); // 空文本也缓存,避免重复拉取;标题随缓存走
         if (!text) return { id, title: it.title, error: "该条目没有正文也没有总结" };
         return kbReadFromCache(id, args.cursor, args.limit);
       });
@@ -2122,6 +2138,18 @@
       composer.style.display = "flex";
       if (scopeCard) scopeCard.style.display = scopeCard.dataset.collapsed === "1" ? "none" : "block";
       msgs.replaceChildren();
+      // 预扫工具结果建 id→标题映射:read_item 结果自带标题,不依赖 kbMeta 是否已加载(partial/未就绪时 find 会落空)
+      const titleById = new Map();
+      for (const m of chat.messages) {
+        if (m.role !== "tool") continue;
+        try {
+          const r = JSON.parse(m.content);
+          if (!r || typeof r !== "object") continue;
+          if (r.id && r.title) titleById.set(r.id, r.title);
+          for (const it of Array.isArray(r.items) ? r.items : []) if (it && it.id && it.title) titleById.set(it.id, it.title);
+          for (const it of Array.isArray(r.hits) ? r.hits : []) if (it && it.id && it.title) titleById.set(it.id, it.title);
+        } catch { /* 展示用,解析失败跳过 */ }
+      }
       const seenIds = new Set(); // 本次渲染内的引用去重(渲染是全量重绘,按次收集)
       let refs = []; // 当前 assistant 回答的引用(自上一条回答后被 read 的条目)
       for (const m of chat.messages) {
@@ -2142,9 +2170,10 @@
               try {
                 const a = JSON.parse(fn.arguments || "{}");
                 if (a.query) label += ":" + a.query;
-                if (a.item_id) { // 引用显示条目标题而非裸 ID;索引未覆盖时退回 ID
-                  const meta = kbMeta ? kbMeta.items.find((it) => it.id === a.item_id) : null;
-                  const t = (meta && meta.title) || a.item_id;
+                if (a.item_id) { // 引用显示条目标题而非裸 ID;工具结果→索引都没有才退回 ID
+                  const t = titleById.get(a.item_id)
+                    || (kbMeta ? (kbMeta.items.find((it) => it.id === a.item_id) || {}).title : "")
+                    || a.item_id;
                   label += ":" + (t.length > 18 ? t.slice(0, 18) + "…" : t);
                 }
               } catch { /* 展示用,解析失败就显示原名 */ }
@@ -2201,15 +2230,25 @@
   }
 
   // 历史会话列表视图:继续 = 载入为当前会话(从历史移除);删除 = 移除记录
+  // 历史会话列表:点整张卡片即载入继续;删除两段式确认防误触;page 容器统一留白不贴边
   function renderHistoryView(msgs, status) {
     msgs.replaceChildren();
     const list = loadChatHistory();
     status.textContent = list.length
-      ? "点「继续」把该会话载入为当前对话,可接着追问"
+      ? "点任意会话即可载入并继续追问"
       : "还没有历史会话。开始新会话时,上一段对话会自动存入这里。";
-    msgs.append(mkBtn("← 返回当前对话", undefined, false, () => { chat.view = "chat"; renderChat(); }));
+    const page = h("div", { padding: "2px 10px 8px" });
+    page.append(mkBtn("← 返回当前对话", undefined, false, () => { chat.view = "chat"; renderChat(); }));
     for (const s of list) {
-      const cont = mkBtn("继续", C.accent, false, () => {
+      const card = h("div", {
+        display: "flex", "align-items": "center", gap: "10px",
+        padding: "10px 12px", "margin-top": "8px",
+        background: C.bg2, border: `1px solid ${C.border}`, "border-radius": "10px",
+        cursor: "pointer", transition: "border-color .12s ease",
+      });
+      card.addEventListener("mouseenter", () => card.style.setProperty("border-color", C.accent));
+      card.addEventListener("mouseleave", () => card.style.setProperty("border-color", C.border));
+      card.addEventListener("click", () => {
         if (chat.running) { // 运行中先接管:与 resetChatSession 对齐,不等 abort 落地就交还控制权
           chat.abort = true;
           if (chatAbort) chatAbort.abort();
@@ -2230,17 +2269,37 @@
         renderChat();
         toast("已载入历史会话(" + chat.messages.length + " 条消息),可继续追问");
       });
-      const del = mkBtn("删除", C.danger, false, () => {
+      const del = mkBtn("删除", C.danger, false, () => {});
+      let armed = false, armTimer = null;
+      del.addEventListener("click", (e) => {
+        e.stopPropagation(); // 卡片的点击是载入,删除不能冒泡
+        if (!armed) {
+          armed = true;
+          del.textContent = "确认删除?";
+          del.style.setProperty("background", C.danger);
+          del.style.setProperty("color", "#fff");
+          armTimer = setTimeout(() => { // 3 秒不确认自动还原,误触即失效
+            armed = false;
+            del.textContent = "删除";
+            del.style.setProperty("background", "transparent");
+            del.style.setProperty("color", C.danger);
+          }, 3000);
+          return;
+        }
+        clearTimeout(armTimer);
         saveChatHistory(loadChatHistory().filter((x) => x.id !== s.id));
         renderChat();
       });
-      msgs.append(h("div", { display: "flex", "align-items": "center", gap: "8px", padding: "8px 4px", "border-bottom": "1px solid " + C.border },
+      card.append(
         h("div", { flex: "1", "min-width": "0" },
           h("div", { "font-weight": "600", "font-size": "13px", overflow: "hidden", "text-overflow": "ellipsis", "white-space": "nowrap" }, s.title),
-          h("div", { "font-size": "11px", color: C.sub },
+          h("div", { "font-size": "11px", color: C.sub, "margin-top": "2px" },
             new Date(s.updated_at).toLocaleString("zh-CN", { hour12: false }) + " · " + s.messages.length + " 条消息 · " + (s.mode === "items" ? "按资料" : "按分组"))),
-        cont, del));
+        del,
+      );
+      page.append(card);
     }
+    msgs.append(page);
   }
 
   function buildChatTab(body) {
