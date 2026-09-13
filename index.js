@@ -306,6 +306,7 @@ export default {
         items.push({
           id: it.id,
           title: it.title,
+          url: it.url,
           site: it.site,
           type: it.type,
           group_id: resolveGroup(it),

@@ -99,13 +99,27 @@ wrangler deploy
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| POST | `/api/save` | 保存条目 `{url, title, site, type, content}` |
-| GET | `/api/items` | 列表(摘要,不含正文;`?full=1` 全量) |
+| POST | `/api/save` | 保存条目 `{url, title, site, type, content, group_id?}` |
+| GET | `/api/items` | 列表(摘要,不含正文;`?full=1` 全量;条目含 `group_id`) |
 | GET/DELETE | `/api/item/:id` | 单条 / 删除 |
 | POST | `/api/summarize` | 对条目正文生成 AI 总结 `{id}` |
 | POST | `/api/status` | PC 归档脚本回写 `{id, status, archive, summary}` |
 | GET/POST | `/api/settings` | LLM 配置(GET 回显掩码 key;POST 留空/掩码不覆盖) |
 | POST | `/api/models` | 代理拉取 `{api_base}/models` 模型列表 |
+| GET/POST | `/api/groups` | 分组列表 / 管理(`{action: create\|rename\|delete, id?, name?}`) |
+| POST | `/api/group/assign` | 批量移动条目 `{ids[≤200], group_id}` |
+| GET | `/api/kb/metadata` | 有界分页元数据 `?cursor=&limit=`(单页 ≤40;含标题/来源/分组/摘要,不含正文) |
+| POST | `/api/chat` | 知识库对话代理:透传 `{messages, tools?, model?}` 到 chat completions,支持原生工具调用;默认用设置页模型,可用 `model` 覆盖 |
+
+## 知识库对话(对话 Tab)
+
+油猴面板「对话」Tab 基于收藏内容做问答,采用**工具调用 Agent** 形式:资料全文不会一次性塞给模型,助手通过三个只读工具自主检索和阅读——`list_items`(浏览范围)、`search_kb`(搜标题/总结)、`read_item`(分段读正文,长文用 `next_cursor` 续读)。
+
+- **范围**:按分组(单选/多选/全选)或按资料(列表勾选后点「就这些聊」,最多 20 条,摘要自动注入、正文仍按需读取)。范围即权限,模型无法用工具参数读到范围外的条目。
+- **预算护栏**:单轮问答最多 8 次模型请求、16 次工具执行,累计注入工具正文 ≤24000 字符;到限明确终止并提示,不静默截断。
+- **分组**:设置页可增删改分组;删除分组不删资料,组内条目自动按默认组解释。
+- **会话**:保存在油猴脚本本地(GM 存储),切 Tab/收起面板不丢;刷新页面会中断运行中的回答(恢复历史并标注中断,不自动重发)。对话历史上限 60 条。
+- **安全**:模型请求经 Worker 代理,API Key 不出服务端;资料内容按数据注入(提示注入不可触发写入/删除/越权);回答区纯文本渲染,引用可点击跳转原文。
 
 ## 说明
 
