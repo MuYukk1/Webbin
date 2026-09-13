@@ -3,7 +3,7 @@
 // @name:en      Webbin Saver
 // @description  保存网页正文/B站视频到自己的 Cloudflare Worker,双端 Edge 可用;B站视频可抓取字幕/评论,AI 总结、分组管理与知识库对话(工具调用 Agent)、下载归档
 // @namespace    https://github.com/local/webbin
-// @version      0.8.3
+// @version      0.8.4
 // @updateURL    /userscript.user.js
 // @author       you
 // @match        *://*/*
@@ -686,7 +686,7 @@
     return base ? base + "/userscript.user.js" : "";
   };
   const SCRIPT_VERSION =
-    (typeof GM_info !== "undefined" && GM_info.script && GM_info.script.version) || "0.8.3";
+    (typeof GM_info !== "undefined" && GM_info.script && GM_info.script.version) || "0.8.4";
   let versionCache = null;
 
   function renderVersionFooter(el, v) {
@@ -1941,7 +1941,7 @@
     const question = chat.input.trim();
     if (!question) return;
     if (!chatScopeIds().size) {
-      toast("请先选择对话范围", true);
+      toast("尚未选择范围:点左下「📚 范围」展开,勾选分组(或点「全选」)", true);
       return;
     }
     chat.input = "";
@@ -2300,7 +2300,8 @@
     input.addEventListener("keydown", (e) => {
       if (e.key === "Enter" && !e.shiftKey) {
         e.preventDefault();
-        if (!chat.running) chatSend().then(() => { input.value = chat.input || ""; });
+        if (!chat.running) chatSend().then(() => { input.value = chat.input || ""; })
+          .catch((e) => { console.error("[webbin] chatSend:", e); toast("发送出错: " + e.message, true); });
       }
     });
 
@@ -2326,7 +2327,8 @@
     sendBtn.title = "发送";
     sendBtn.addEventListener("click", () => {
       if (chat.running) return chatStop();
-      chatSend().then(() => { input.value = chat.input || ""; });
+      chatSend().then(() => { input.value = chat.input || ""; })
+        .catch((e) => { console.error("[webbin] chatSend:", e); toast("发送出错: " + e.message, true); });
     });
 
     const bottomRow = h("div", { display: "flex", "align-items": "center", gap: "8px", "margin-top": "4px" },
@@ -2372,9 +2374,18 @@
     renderChat();
     // 元数据按需加载(缓存 24h);分组列表拉取后渲染范围
     loadKbMeta(false, (s) => { status.textContent = s; })
-      .then(() => { if (status.isConnected && !chat.running) status.textContent = ""; renderScope(); })
+      .then(() => { if (status.isConnected && !chat.running) status.textContent = ""; autoSelectScope(); renderScope(); })
       .catch((e) => toast("资料索引加载失败: " + e.message, true));
-    refreshGroups();
+    refreshGroups().then(() => { autoSelectScope(); renderScope(); });
+
+    // 首次使用/从未选过范围时,默认全选分组(范围=全库),打开即可提问,不需要先懂范围概念
+    function autoSelectScope() {
+      if (chat.mode !== "groups" || chat.messages.length || chat.groups.length) return;
+      const all = [{ id: "default", name: "默认" }].concat(chat.kbGroups || []).map((g) => g.id);
+      if (!all.length) return;
+      chat.groups = all;
+      saveChatState();
+    }
   }
 
   // ---------- 小部件 ----------
