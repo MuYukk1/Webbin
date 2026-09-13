@@ -3,7 +3,7 @@
 // @name:en      Webbin Saver
 // @description  保存网页正文/B站视频到自己的 Cloudflare Worker,双端 Edge 可用;B站视频可抓取字幕/评论,AI 总结、分组管理与知识库对话(工具调用 Agent)、下载归档
 // @namespace    https://github.com/local/webbin
-// @version      0.8.4
+// @version      0.8.5
 // @updateURL    /userscript.user.js
 // @author       you
 // @match        *://*/*
@@ -94,9 +94,19 @@
   }
 
   // CSP 安全的 DOM 构建:样式全部走 CSSOM,不用 innerHTML/style 属性
+  // DOM 属性白名单:value/disabled 等不是 CSS,style.setProperty 对它们是静默 no-op
+  // (曾导致 <option value=""> 从未生效,下拉框占位文本被当成模型名发给 API)
+  const H_DOM_PROPS = new Set([
+    "value", "disabled", "checked", "selected", "type", "rows", "readOnly",
+    "href", "target", "rel", "placeholder", "title", "name", "id",
+    "autocomplete", "required", "min", "max", "step", "colSpan", "rowSpan",
+  ]);
   function h(tag, styles, ...children) {
     const el = document.createElement(tag);
-    if (styles) for (const [k, v] of Object.entries(styles)) el.style.setProperty(k.replace(/[A-Z]/g, (c) => "-" + c.toLowerCase()), String(v));
+    if (styles) for (const [k, v] of Object.entries(styles)) {
+      if (H_DOM_PROPS.has(k)) { el[k] = v == null ? "" : v; continue; }
+      el.style.setProperty(k.replace(/[A-Z]/g, (c) => "-" + c.toLowerCase()), String(v));
+    }
     for (const child of children.flat()) {
       if (child == null) continue;
       el.append(typeof child === "string" ? document.createTextNode(child) : child);
@@ -686,7 +696,7 @@
     return base ? base + "/userscript.user.js" : "";
   };
   const SCRIPT_VERSION =
-    (typeof GM_info !== "undefined" && GM_info.script && GM_info.script.version) || "0.8.4";
+    (typeof GM_info !== "undefined" && GM_info.script && GM_info.script.version) || "0.8.5";
   let versionCache = null;
 
   function renderVersionFooter(el, v) {
@@ -1746,6 +1756,8 @@
   let kbMeta = null;             // {loaded_at,total,items,partial} 元数据缓存(标题/来源/分组/摘要)
   const kbBodyCache = new Map(); // item_id → 已标注来源的全文;仅内存,避免 GM 存储容量管理
   let chatDom = null;            // 当前对话 Tab 的 DOM 引用,切 Tab 自动失效
+  let historyBtnEl = null;       // 顶栏「历史」按钮引用(renderChat 更新其计数,renderTop 重建后刷新)
+  let topBtns = {};              // 顶栏 mini 按钮引用(刷新索引时禁用)
   let chatAbort = null;          // 在途模型请求的 abort 句柄
   const chat = {
     mode: "groups",  // groups | items
@@ -1781,6 +1793,8 @@
     chat.itemIds = Array.isArray(s.itemIds) ? s.itemIds : [];
     chat.messages = s.messages;
     chat.model = typeof s.model === "string" ? s.model : "";
+    // 0.8.4 及之前 h() 未设置 option 的 value,下拉占位文本曾被误存为模型名
+    if (chat.model === "模型:跟随设置" || chat.model === "← 点击下方「刷新模型列表」或先手动保存 api_base") chat.model = "";
     return s.running === true;
   }
 
@@ -2178,8 +2192,6 @@
     const root = h("div", { height: "100%", "box-sizing": "border-box", display: "flex", "flex-direction": "column" });
     body.append(root);
 
-    let historyBtnEl = null;
-    let topBtns = {};   // 顶栏 mini 按钮引用(刷新索引时禁用)
     let scopeOpen = true;
 
     // ---- 顶栏:模型选择 + 会话操作 ----
