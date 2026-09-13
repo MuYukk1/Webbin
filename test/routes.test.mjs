@@ -130,8 +130,13 @@ t("删除后列表为空", (await req("GET", "/api/items", null, "test-token")).
     };
     const chat1 = await req("POST", "/api/chat", { messages: [{ role: "user", content: "你好" }] }, "test-token");
     t("聊天代理透传响应", chat1.status === 200 && chat1.data.choices[0].message.content === "回答");
-    const chat2 = await req("POST", "/api/chat", { messages: [{ role: "user", content: "?" }], tools: [{ type: "function" }], model: "override-m" }, "test-token");
+    const chat2 = await req("POST", "/api/chat", {
+      messages: [{ role: "user", content: "?" }],
+      tools: [{ type: "function", function: { name: "search_kb", parameters: { type: "object", properties: {} } } }],
+      model: "override-m",
+    }, "test-token");
     t("聊天代理透传 tool_calls 与模型覆盖", chat2.data.choices[0].message.tool_calls.length === 1);
+    t("非法形状 tools 被拒", (await req("POST", "/api/chat", { messages: [{ role: "user", content: "?" }], tools: [{ type: "function" }] }, "test-token")).status === 400);
     t("空 messages 被拒", (await req("POST", "/api/chat", { messages: [] }, "test-token")).status === 400);
     t("非法 role 被拒", (await req("POST", "/api/chat", { messages: [{ role: "admin", content: "x" }] }, "test-token")).status === 400);
     t("tool 消息缺 tool_call_id 被拒", (await req("POST", "/api/chat", { messages: [{ role: "tool", content: "x" }] }, "test-token")).status === 400);
