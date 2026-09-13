@@ -3,7 +3,7 @@
 // @name:en      Webbin Saver
 // @description  保存网页正文/B站视频到自己的 Cloudflare Worker,双端 Edge 可用;B站视频可抓取字幕/评论,AI 总结、分组管理与知识库对话(工具调用 Agent)、下载归档
 // @namespace    https://github.com/local/webbin
-// @version      0.8.13
+// @version      0.8.14
 // @updateURL    /userscript.user.js
 // @author       you
 // @match        *://*/*
@@ -697,7 +697,7 @@
     return base ? base + "/userscript.user.js" : "";
   };
   const SCRIPT_VERSION =
-    (typeof GM_info !== "undefined" && GM_info.script && GM_info.script.version) || "0.8.13";
+    (typeof GM_info !== "undefined" && GM_info.script && GM_info.script.version) || "0.8.14";
   let versionCache = null;
 
   function renderVersionFooter(el, v) {
@@ -2373,8 +2373,8 @@
       updateModelBtn(); // 模型控件在底部输入区,顶栏只负责同步它的选中值与列表
     }
 
-    // ---- 范围选择:分组/资料两个多选下拉,ZCode 风格融在输入框深色底行;面板向上弹(面板容器 overflow hidden) ----
-    let openDrop = null; // "groups" | "items" | null
+    // ---- 范围/模型选择:三个自绘多选下拉(ZCode 风格),按钮在输入框深色底行,面板锚定输入框横跨宽度、悬在底行上方 ----
+    let openDrop = null; // "groups" | "items" | "model" | null
     const drops = {};    // key → { btn, label, panel }
     const mkChip = (text, on, onClick) => {
       const c = h("button", {
@@ -2453,6 +2453,38 @@
         panel.append(row);
         return;
       }
+      // 模型选择:与分组/资料一致的自绘下拉,替代原生 select(样式不可控、与整体风格脱节)
+      if (key === "model") {
+        const models = GM_getValue("models_cache", []);
+        const mkRow = (value, text) => {
+          const on = (chat.model || "") === value;
+          const row = h("div", {
+            display: "flex", "align-items": "center", gap: "8px", padding: "7px 8px",
+            "border-radius": "8px", cursor: "pointer", "font-size": "12px",
+            color: on ? C.accent : C.text,
+          },
+            h("span", { "flex-shrink": "0", width: "14px", "text-align": "center" }, on ? "✓" : ""),
+            h("span", { flex: "1", "min-width": "0", overflow: "hidden", "text-overflow": "ellipsis", "white-space": "nowrap" }, text));
+          row.addEventListener("mouseenter", () => row.style.setProperty("background", C.bg2));
+          row.addEventListener("mouseleave", () => row.style.setProperty("background", "transparent"));
+          row.addEventListener("click", () => {
+            chat.model = value;
+            saveChatState();
+            updateModelBtn();
+            closeDrops(); // 模型是单选,选完即收起(分组/资料是多选才保持展开)
+          });
+          return row;
+        };
+        panel.append(mkRow("", "跟随设置(用设置页配置的模型)"));
+        for (const m of models) panel.append(mkRow(m, m));
+        // 恢复的手填模型不在缓存列表里:补一行,否则当前模型在面板里"隐身",无法确认也无法切回
+        if (chat.model && !models.includes(chat.model)) panel.append(mkRow(chat.model, chat.model + "(手动输入,不在缓存列表)"));
+        if (!models.length && !chat.model) {
+          panel.append(h("div", { "font-size": "11px", color: C.sub, padding: "4px 2px" },
+            "暂无模型列表:去设置页保存 LLM 配置或点「刷新模型列表」,这里会自动出现"));
+        }
+        return;
+      }
       // 资料多选:直接在面板里点选条目,搜索过滤;面板最多渲染前 200 行防大库卡顿
       panel.append(h("div", { "font-size": "11px", color: C.sub, "margin-bottom": "8px" },
         "点选要对话的资料;也可在「已保存」列表勾选后点「就这些聊」"));
@@ -2528,36 +2560,7 @@
         searchTimer = setTimeout(renderList, 150);
       });
       renderList();
-    // 模型选择:与分组/资料一致的自绘下拉,替代原生 select(样式不可控、与整体风格脱节)
-    if (key === "model") {
-      const models = GM_getValue("models_cache", []);
-      const mkRow = (value, text) => {
-        const on = (chat.model || "") === value;
-        const row = h("div", {
-          display: "flex", "align-items": "center", gap: "8px", padding: "7px 8px",
-          "border-radius": "8px", cursor: "pointer", "font-size": "12px",
-          color: on ? C.accent : C.text,
-        },
-          h("span", { "flex-shrink": "0", width: "14px", "text-align": "center" }, on ? "✓" : ""),
-          h("span", { flex: "1", "min-width": "0", overflow: "hidden", "text-overflow": "ellipsis", "white-space": "nowrap" }, text));
-        row.addEventListener("mouseenter", () => row.style.setProperty("background", C.bg2));
-        row.addEventListener("mouseleave", () => row.style.setProperty("background", "transparent"));
-        row.addEventListener("click", () => {
-          chat.model = value;
-          saveChatState();
-          updateModelBtn();
-          renderDropPanel("model");
-        });
-        return row;
-      };
-      panel.append(mkRow("", "跟随设置(用设置页配置的模型)"));
-      for (const m of models) panel.append(mkRow(m, m));
-      if (!models.length) {
-        panel.append(h("div", { "font-size": "11px", color: C.sub, padding: "4px 2px" },
-          "暂无模型列表:去设置页保存 LLM 配置或点「刷新模型列表」,这里会自动出现"));
-      }
     }
-  }
 
     function renderScope() {
       const gl = [{ id: "default", name: "默认" }].concat(chat.kbGroups || []);
@@ -2607,7 +2610,7 @@
 
     // 模型按钮的选中值与列表同步;缓存为空或超过 1 小时时后台静默拉一次模型列表(失败不打扰)
     function updateModelBtn() {
-      drops.model.label.textContent = chat.model || "跟随设置";
+      drops.model.label.textContent = "模型:" + (chat.model || "跟随设置");
       drops.model.btn.style.setProperty("color", chat.model ? C.text : C.sub);
       if (openDrop === "model") renderDropPanel("model");
     }
