@@ -332,6 +332,13 @@ export default {
       let tools = null;
       if (body.tools != null) {
         if (!Array.isArray(body.tools) || body.tools.length > 32) return bad("tools 不合法");
+        for (const t of body.tools) {
+          if (!t || t.type !== "function" || !t.function
+            || typeof t.function.name !== "string" || !/^[a-zA-Z0-9_-]{1,64}$/.test(t.function.name)
+            || (t.function.parameters != null && typeof t.function.parameters !== "object")) {
+            return bad("tools 条目不合法");
+          }
+        }
         tools = body.tools;
       }
       const settings = await getSettings(KV);

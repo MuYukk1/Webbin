@@ -3,7 +3,7 @@
 // @name:en      Webbin Saver
 // @description  保存网页正文/B站视频到自己的 Cloudflare Worker,双端 Edge 可用;B站视频可抓取字幕/评论,AI 总结、分组管理与知识库对话(工具调用 Agent)、下载归档
 // @namespace    https://github.com/local/webbin
-// @version      0.8.5
+// @version      0.8.6
 // @updateURL    /userscript.user.js
 // @author       you
 // @match        *://*/*
@@ -696,7 +696,7 @@
     return base ? base + "/userscript.user.js" : "";
   };
   const SCRIPT_VERSION =
-    (typeof GM_info !== "undefined" && GM_info.script && GM_info.script.version) || "0.8.5";
+    (typeof GM_info !== "undefined" && GM_info.script && GM_info.script.version) || "0.8.6";
   let versionCache = null;
 
   function renderVersionFooter(el, v) {
@@ -1759,6 +1759,7 @@
   let historyBtnEl = null;       // 顶栏「历史」按钮引用(renderChat 更新其计数,renderTop 重建后刷新)
   let topBtns = {};              // 顶栏 mini 按钮引用(刷新索引时禁用)
   let chatAbort = null;          // 在途模型请求的 abort 句柄
+  let chatRunId = 0;             // 会话代号:新会话/停止接管后,旧循环凭此不再写状态
   const chat = {
     mode: "groups",  // groups | items
     groups: [],      // 选中的分组 id(多选)
@@ -1800,6 +1801,11 @@
 
   function resetChatSession() {
     archiveCurrentSession(); // 有实际对话内容才归档,新会话不丢上一段
+    if (chat.running) {
+      // 运行中重置:中止在途模型请求,旧循环凭 runId 丢弃收尾,不会污染新会话
+      chat.abort = true;
+      if (chatAbort) chatAbort.abort();
+    }
     chat.messages = [];
     chat.running = false;
     saveChatState();
@@ -1887,7 +1893,9 @@
 
   function kbReadFromCache(id, cursor, limit) {
     const text = kbBodyCache.get(id) || "";
-    const c = chunkText(text, cursor, limit > 0 ? limit : CHAT_LIMITS.readChunk);
+    // 单段上限 20000:防止模型传超大 limit 一次拉走整篇
+    const size = Math.min(20000, Math.max(200, limit > 0 ? limit : CHAT_LIMITS.readChunk));
+    const c = chunkText(text, cursor, size);
     return { id, total_chars: c.total, content: c.chunk, next_cursor: c.next_cursor, truncated: c.truncated };
   }
 
@@ -1960,8 +1968,9 @@
     }
     chat.input = "";
     chat.running = true;
+    const runId = ++chatRunId; // 会话代号:中途新会话/停止接管后,旧循环不再写收尾状态
+    const msgs = chat.messages; // 捕获本轮消息数组引用;新会话会替换 chat.messages,旧循环不再污染新会话
     let modelCalls = 0, toolExecs = 0, toolChars = 0, forcedFinal = false, stopReason = "";
-    const seenIds = new Set(); // 本轮引用去重
 
     // 中断恢复的会话可能停在 tool 消息上:先补收尾行,保证 user 前的消息序列合法
     const lastMsg = chat.messages[chat.messages.length - 1];
@@ -1969,23 +1978,23 @@
       chat.messages.push({ role: "assistant", content: "— 上次会话在此中断。" });
     }
 
-    if (!chat.messages.length) {
-      chat.messages.push({ role: "system", content: chatSystemPrompt() });
+    if (!msgs.length) {
+      msgs.push({ role: "system", content: chatSystemPrompt() });
     }
     // 用户消息先入列并立即渲染:不让任何后续注入挂起影响"我的消息"可见性
-    chat.messages.push({ role: "user", content: question });
+    msgs.push({ role: "user", content: question });
     renderChat();
 
     // 「就这些聊」首轮:显式选中条目的总结注入到用户问题之前,正文仍走工具
     if (chat.mode === "items" && chat.itemIds.length
-      && chat.messages.filter((m) => m.role === "user").length === 1) {
+      && msgs.filter((m) => m.role === "user").length === 1) {
       try {
         const parts = [];
         for (const id of chat.itemIds.slice(0, CHAT_LIMITS.maxSelected)) {
           const it = await gmFetch("GET", "/api/item/" + id);
           parts.push(`【${it.title}】(id:${it.id},来源:${it.url})\n${(it.summary || "(无总结,可用 read_item 读取正文)").slice(0, 2000)}`);
         }
-        chat.messages.splice(chat.messages.length - 1, 0, {
+        msgs.splice(msgs.length - 1, 0, {
           role: "system",
           content: "用户明确选中了以下资料,摘要如下;全文可用 read_item(item_id) 分段读取:\n\n" + parts.join("\n\n"),
         });
@@ -2004,9 +2013,11 @@
           break;
         }
         modelCalls++;
+        // 最后一次请求不带 tools:强制收尾作答,避免"执行完工具结果却没有次数总结"的死胡同
+        const finalCall = modelCalls >= CHAT_LIMITS.modelCalls;
         chatAbort = gmFetch("POST", "/api/chat", {
-          messages: chat.messages,
-          tools: forcedFinal ? undefined : CHAT_TOOLS,
+          messages: msgs,
+          tools: (forcedFinal || finalCall) ? undefined : CHAT_TOOLS,
           model: chat.model,
         }, { timeout: 300000 });
         const r = await chatAbort;
@@ -2014,11 +2025,11 @@
         const m = r && r.choices && r.choices[0] && r.choices[0].message;
         if (!m) throw new Error("模型响应缺少 message 字段");
 
-        if (Array.isArray(m.tool_calls) && m.tool_calls.length && !forcedFinal) {
-          chat.messages.push({ role: "assistant", content: String(m.content || ""), tool_calls: m.tool_calls });
+        if (Array.isArray(m.tool_calls) && m.tool_calls.length && !forcedFinal && !finalCall) {
+          msgs.push({ role: "assistant", content: String(m.content || ""), tool_calls: m.tool_calls });
           for (const tc of m.tool_calls) {
             if (chat.abort) {
-              chat.messages.push({ role: "tool", tool_call_id: tc.id, content: JSON.stringify({ error: "用户停止" }) });
+              msgs.push({ role: "tool", tool_call_id: tc.id, content: JSON.stringify({ error: "用户停止" }) });
               continue;
             }
             let result;
@@ -2027,21 +2038,29 @@
             } else {
               toolExecs++;
               const fn = tc.function || {};
-              result = await chatToolExec(fn.name, fn.arguments);
+              try {
+                result = await chatToolExec(fn.name, fn.arguments);
+              } catch (e) {
+                // 单个工具失败(如条目已被删除)不终结整轮,把错误交给模型自行调整
+                result = { error: "工具执行失败: " + e.message };
+              }
               toolChars += JSON.stringify(result).length;
               if (toolChars > CHAT_LIMITS.turnToolChars) {
                 forcedFinal = true;
                 result = { ...(result || {}), note: "工具预算已用尽,请基于已有信息回答" };
               }
             }
-            chat.messages.push({ role: "tool", tool_call_id: tc.id, content: JSON.stringify(result).slice(0, 30000) });
+            const text = JSON.stringify(result);
+            // 截断必须显式标注,不静默丢尾部
+            const clipped = text.length > 30000;
+            msgs.push({ role: "tool", tool_call_id: tc.id, content: clipped ? text.slice(0, 30000) + `…[工具结果已截断,原始 ${text.length} 字符]` : text });
             renderChat();
             saveChatState();
           }
           continue;
         }
 
-        chat.messages.push({ role: "assistant", content: String(m.content || "").trim() || "(模型返回了空回答)" });
+        msgs.push({ role: "assistant", content: String(m.content || "").trim() || "(模型返回了空回答)" });
         break;
       }
     } catch (e) {
@@ -2051,13 +2070,15 @@
       if (/无可用渠道|no available channel|渠道|channel/i.test(msg)) {
         msg += " —— 当前模型可能没有支持工具调用的渠道,请在顶部下拉里换一个模型再试";
       }
-      if (!chat.abort) chat.messages.push({ role: "assistant", content: "✗ 出错: " + msg });
+      if (!chat.abort) msgs.push({ role: "assistant", content: "✗ 出错: " + msg });
       stopReason = chat.abort ? "已手动停止" : "出错终止";
     }
+    // 中途被新会话接管:旧循环不得写新会话的状态
+    if (runId !== chatRunId) return;
     chat.running = false;
     chat.abort = false;
     chatAbort = null;
-    if (stopReason) chat.messages.push({ role: "assistant", content: `— ${stopReason}。可缩小范围继续提问,或点「新会话」。` });
+    if (stopReason) msgs.push({ role: "assistant", content: `— ${stopReason}。可缩小范围继续提问,或点「新会话」。` });
     saveChatState();
     renderChat();
   }
@@ -2088,6 +2109,7 @@
       }
       composer.style.display = "flex";
       msgs.replaceChildren();
+      const seenIds = new Set(); // 本次渲染内的引用去重(渲染是全量重绘,按次收集)
       let refs = []; // 当前 assistant 回答的引用(自上一条回答后被 read 的条目)
       for (const m of chat.messages) {
         if (m.role === "system") continue;
@@ -2119,10 +2141,14 @@
             const refBox = h("div", { "margin-top": "6px", "font-size": "11px", color: C.sub }, "来源:");
             for (const r of refs) {
               const a = h("a", { color: C.accent, cursor: "pointer", "font-size": "11px", "word-break": "break-all" }, "· " + r.title);
-              a.href = r.url || "#";
-              a.target = "_blank";
-              a.rel = "noopener noreferrer";
-              a.title = r.url || "";
+              if (/^https?:\/\//i.test(r.url || "")) { // 只放行 http(s),防 javascript: 等 scheme
+                a.href = r.url;
+                a.target = "_blank";
+                a.rel = "noopener noreferrer";
+                a.title = r.url;
+              } else {
+                a.style.setProperty("cursor", "default");
+              }
               refBox.append(h("div", { "margin-top": "2px" }, a));
             }
             wrap.append(refBox);
