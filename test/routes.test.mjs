@@ -136,6 +136,24 @@ t("删除后列表为空", (await req("GET", "/api/items", null, "test-token")).
       model: "override-m",
     }, "test-token");
     t("聊天代理透传 tool_calls 与模型覆盖", chat2.data.choices[0].message.tool_calls.length === 1);
+
+    // tool_choice 透传:收尾调用强制文本("none"),未声明/非法值一律 auto
+    let seenChoice = null;
+    globalThis.fetch = async (u, init) => {
+      seenChoice = JSON.parse(init.body).tool_choice;
+      return new Response(JSON.stringify({ choices: [{ message: { role: "assistant", content: "回答" } }] }),
+        { status: 200, headers: { "content-type": "application/json" } });
+    };
+    const toolDef = [{ type: "function", function: { name: "search_kb", parameters: { type: "object", properties: {} } } }];
+    await req("POST", "/api/chat", { messages: [{ role: "user", content: "?" }], tools: toolDef, tool_choice: "none" }, "test-token");
+    t("tool_choice:\"none\" 透传给上游(强制文本收尾)", seenChoice === "none");
+    await req("POST", "/api/chat", { messages: [{ role: "user", content: "?" }], tools: toolDef }, "test-token");
+    t("未声明 tool_choice 默认 auto", seenChoice === "auto");
+    await req("POST", "/api/chat", { messages: [{ role: "user", content: "?" }], tools: toolDef, tool_choice: "bogus!!" }, "test-token");
+    t("非法 tool_choice 值按 auto 处理", seenChoice === "auto");
+    await req("POST", "/api/chat", { messages: [{ role: "user", content: "?" }], tool_choice: "none" }, "test-token");
+    t("无 tools 时不下发 tool_choice", seenChoice === undefined);
+
     t("非法形状 tools 被拒", (await req("POST", "/api/chat", { messages: [{ role: "user", content: "?" }], tools: [{ type: "function" }] }, "test-token")).status === 400);
     t("空 messages 被拒", (await req("POST", "/api/chat", { messages: [] }, "test-token")).status === 400);
     t("非法 role 被拒", (await req("POST", "/api/chat", { messages: [{ role: "admin", content: "x" }] }, "test-token")).status === 400);

@@ -348,7 +348,9 @@ export default {
       const payload = { model, messages: msgs };
       if (tools) {
         payload.tools = tools;
-        payload.tool_choice = "auto"; // 显式声明,部分中转站不默认按 auto 处理
+        // tool_choice 只放行客户端的 "none"(强制文本收尾),其余一律 auto——
+        // 显式声明是因为部分中转站不默认按 auto 处理
+        payload.tool_choice = body.tool_choice === "none" ? "none" : "auto";
       }
       if (JSON.stringify(payload).length > 600000) return bad("请求过大,请缩小对话范围或开新会话");
       const base = settings.api_base.replace(/\/+$/, "");
