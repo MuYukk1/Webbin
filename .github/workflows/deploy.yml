@@ -13,7 +13,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - run: node test/routes.test.mjs
+      - run: npm test # routes + 对话 Agent 循环端到端,全绿才部署
 
   deploy:
     needs: test
