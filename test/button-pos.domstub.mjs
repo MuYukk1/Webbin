@@ -7,7 +7,7 @@ import vm from "node:vm";
 let CURRENT_VIEW = { w: 0, h: 0 };
 
 class El {
-  constructor(tag) {
+  constructor(tag, text) {
     this.tagName = String(tag).toUpperCase();
     this._view = CURRENT_VIEW; // right/bottom 反推需要当前视口
     this.children = [];
@@ -15,12 +15,21 @@ class El {
     this._attrs = {};
     this._props = {};
     this._listeners = {};
-    this.textContent = "";
+    this._text = text == null ? "" : String(text);
     this.title = "";
     this.offsetParent = null;
     this._style = mkStyle(this);
   }
   get style() { return this._style; }
+  // 与浏览器一致:textContent 聚合自身文本与后代文本
+  get textContent() {
+    if (this._text) return this._text;
+    return this.children.map((c) => c.textContent).join("");
+  }
+  set textContent(v) { this._text = String(v); this.children = []; }
+  get lastChild() { return this.children[this.children.length - 1] || null; }
+  get firstChild() { return this.children[0] || null; }
+  get isConnected() { let n = this; while (n.parentElement) n = n.parentElement; return n.tagName === "HTML"; }
   get offsetLeft() {
     const L = parseFloat(this._props.left);
     if (!Number.isNaN(L)) return Math.round(L);
@@ -44,16 +53,17 @@ class El {
     const e = Object.assign({ target: this, preventDefault() {}, stopPropagation() {} }, ev);
     (this._listeners[type] || []).forEach((f) => f.call(this, e));
   }
+  fire(type, ev) { this.dispatch(type, ev); }
   append(...nodes) {
     for (const n of nodes.flat()) {
       if (n == null) continue;
-      const node = typeof n === "string" ? Object.assign(new El("#text"), { textContent: n }) : n;
+      const node = typeof n === "string" ? new El("#text", n) : n;
       node.parentElement = this;
       this.children.push(node);
     }
   }
   appendChild(n) { this.append(n); return n; }
-  replaceChildren(...n) { this.children = []; this.append(...n); }
+  replaceChildren(...n) { this.children = []; this._text = ""; this.append(...n); }
   remove() { if (this.parentElement) this.parentElement.children = this.parentElement.children.filter((c) => c !== this); }
   setPointerCapture() {}
   releasePointerCapture() {}
@@ -68,6 +78,8 @@ function mkStyle(el) {
     setProperty(k, v) { props[k] = String(v); layout(el, k, String(v)); },
     getPropertyValue(k) { return props[k] || ""; },
     removeProperty(k) { delete props[k]; delete el._props[k]; },
+    // 供测试读取全部已设声明:e._props 只跟踪影响布局的几个属性
+    all() { return { ...props }; },
   };
 }
 // 只关心影响布局的四个属性;其余(position/z-index/背景等)不影响可见性判定
@@ -98,7 +110,12 @@ export function runScript({ innerWidth, innerHeight, storeBox, isMobile = false,
     createTextNode: (t) => Object.assign(new El("#text"), { textContent: t }),
     querySelectorAll: () => [],
     querySelector: () => null,
-    getElementById: () => null,
+    getElementById: (id) => {
+      let hit = null;
+      const walk = (n) => { for (const c of n.children || []) { if (!hit && (c.id === id || c._attrs.id === id)) hit = c; walk(c); } };
+      walk(docEl);
+      return hit;
+    },
     addEventListener() {}, removeEventListener() {},
     cloneNode() { return document; },
   };
@@ -149,3 +166,37 @@ export function visible(el, w, h) {
   const x = el.offsetLeft, y = el.offsetTop;
   return x < w && y < h && x + el.offsetWidth > 0 && y + el.offsetHeight > 0;
 }
+
+// ---- 驱动真实面板 DOM 的小工具 ----
+
+export function* walk(el) {
+  yield el;
+  for (const c of el.children || []) yield* walk(c);
+}
+
+export function findAll(root, pred) {
+  return [...walk(root)].filter((e) => e.tagName !== "#TEXT" && pred(e));
+}
+
+// 精确匹配文本的按钮/元素(与 chat-loop.test.mjs 的 byText 同语义)
+export function byText(root, txt, tag) {
+  return findAll(root, (e) => (!tag || e.tagName === tag) && (e.textContent || "").trim() === txt)[0];
+}
+
+// 面板结构固定为 [tabs, body, footer];直接从标签按钮所在行定位,避免遍历到宿主页其他 DIV
+export function panelOf(root) {
+  const tabsRow = findAll(root, (e) => e.tagName === "DIV" && e.children.length === 4 && e.children.every((c) => c.tagName === "BUTTON"))[0];
+  return tabsRow?.parentElement || null;
+}
+
+export function tabButton(root, label) {
+  const panel = panelOf(root);
+  return panel ? panel.children[0].children.find((b) => (b.textContent || "").trim() === label) : undefined;
+}
+
+export function scrollBodyOf(root) {
+  return panelOf(root)?.children[1] || null;
+}
+
+export function click(el) { el.fire("click"); }
+export const settle = () => new Promise((r) => setTimeout(r, 0));

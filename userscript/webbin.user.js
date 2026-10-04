@@ -3,7 +3,7 @@
 // @name:en      Webbin Saver
 // @description  保存网页正文/B站视频到自己的 Cloudflare Worker,双端 Edge 可用;B站视频可抓取字幕/评论,AI 总结、分组管理与知识库对话(工具调用 Agent)、下载归档
 // @namespace    https://github.com/local/webbin
-// @version      0.8.16
+// @version      0.8.17
 // @updateURL    /userscript.user.js
 // @author       you
 // @match        *://*/*
@@ -742,7 +742,7 @@
     return base ? base + "/userscript.user.js" : "";
   };
   const SCRIPT_VERSION =
-    (typeof GM_info !== "undefined" && GM_info.script && GM_info.script.version) || "0.8.16";
+    (typeof GM_info !== "undefined" && GM_info.script && GM_info.script.version) || "0.8.17";
   let versionCache = null;
 
   function renderVersionFooter(el, v) {
@@ -890,13 +890,21 @@
     body.replaceChildren();
     // 列表 Tab 顶部内边距归零:批量栏 sticky top:0 才能钉在可见顶边,内容不会从栏上方露出
     // 对话 Tab 自管布局(消息区独立滚动),需关闭 body 滚动并去内边距
-    if (key === "list") body.style.setProperty("padding", "0 14px 14px");
-    else if (key === "chat") {
+    // 每个分支都必须显式写出 overflow/overflow-y:曾有一处遗漏,让「对话 → 已保存」后
+    // 残留 overflow:hidden,列表再也滚不动(面板本身 overflow:hidden,没有上层可代滚)
+    for (const prop of ["padding", "overflow", "overflow-y"]) body.style.removeProperty(prop);
+    if (key === "list") {
+      body.style.setProperty("padding", "0 14px 14px");
+      body.style.setProperty("overflow", "auto");
+      body.style.setProperty("overflow-y", "auto");
+    } else if (key === "chat") {
       body.style.setProperty("padding", "0");
       body.style.setProperty("overflow", "hidden");
+      body.style.setProperty("overflow-y", "hidden");
     } else {
       body.style.setProperty("padding", "14px");
       body.style.setProperty("overflow", "auto");
+      body.style.setProperty("overflow-y", "auto");
     }
     body.removeAttribute("data-wi-anim"); // 清掉上一 Tab 残留,毛玻璃栏不受常驻动画干扰
     playAnim(body, "fade");
