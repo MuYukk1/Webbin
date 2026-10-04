@@ -127,7 +127,7 @@ function makeNet() {
     const finish = (status, obj) =>
       Promise.resolve().then(() => d.onload({ status, responseText: typeof obj === "string" ? obj : JSON.stringify(obj) }));
     const p = new URL(d.url).pathname;
-    if (p.endsWith("/userscript.user.js")) { finish(200, "// ==UserScript==\n// @version 0.8.15\n// ==/UserScript=="); return { abort() {} }; }
+    if (p.endsWith("/userscript.user.js")) { finish(200, "// ==UserScript==\n// @version 0.8.16\n// ==/UserScript=="); return { abort() {} }; }
     if (p === "/api/kb/metadata") { finish(200, { total: META.length, items: META, next_cursor: null }); return { abort() {} }; }
     if (p === "/api/groups") { finish(200, { groups: [] }); return { abort() {} }; }
     if (p === "/api/models") { finish(200, { models: ["m1"], current: "m1" }); return { abort() {} }; }
@@ -196,7 +196,7 @@ function boot(seed) {
     GM_setValue: (k, v) => gmStore.set(k, v === undefined ? v : JSON.parse(JSON.stringify(v))),
     GM_registerMenuCommand: () => {},
     GM_addStyle: () => {},
-    GM_info: { script: { version: "0.8.15-test" } },
+    GM_info: { script: { version: "0.8.16-test" } },
     GM_xmlhttpRequest: net.GM_xmlhttpRequest,
   };
   vm.runInNewContext(SRC, sandbox, { filename: "webbin.user.js" });

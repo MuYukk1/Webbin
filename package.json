@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node test/routes.test.mjs && node test/chat-loop.test.mjs",
+    "test": "node test/routes.test.mjs && node test/chat-loop.test.mjs && node test/button-pos.test.mjs",
     "deploy": "wrangler deploy"
   }
 }
