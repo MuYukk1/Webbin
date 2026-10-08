@@ -249,6 +249,7 @@ function t(name, cond) { cond ? pass++ : fail++; console.log(cond ? "  ✓" : " 
   await until(() => byText(documentElement, "➤", "BUTTON")); // 运行结束,发送键复位
 
   const msgs = msgsElOf(documentElement);
+  await until(() => msgs.textContent.includes(ANSWER)); // 打字机逐字显示,等放完(封顶约 2s)
   t("最终回答已渲染", msgs.textContent.includes(ANSWER));
   t("没有报错/空回答痕迹", !msgs.textContent.includes("✗ 出错") && !msgs.textContent.includes("(模型返回了空回答)"));
   t("两轮读取状态行都在(首批已截断,共 6 行)",
