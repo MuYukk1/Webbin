@@ -3,7 +3,7 @@
 // @name:en      Webbin Saver
 // @description  保存网页正文/B站视频到自己的 Cloudflare Worker,双端 Edge 可用;B站视频可抓取字幕/评论,AI 总结、分组管理与知识库对话(工具调用 Agent)、下载归档
 // @namespace    https://github.com/local/webbin
-// @version      0.8.17
+// @version      0.8.18
 // @updateURL    /userscript.user.js
 // @author       you
 // @match        *://*/*
@@ -117,15 +117,17 @@
   }
 
   const DARK = matchMedia("(prefers-color-scheme: dark)").matches;
+  // 分层表面:bg(面板底) < bg2(卡片/输入区) < bg3(浮起元素)。改主题只改这里,所有取色经 C
   const C = {
-    bg: DARK ? "#1e1f24" : "#ffffff",
-    bg2: DARK ? "#2a2b31" : "#f3f4f6",
-    text: DARK ? "#e8e9ed" : "#1f2328",
-    sub: DARK ? "#9aa0ab" : "#6b7280",
-    accent: "#3b82f6",
-    border: DARK ? "#3a3b41" : "#e5e7eb",
-    danger: "#ef4444",
-    ok: "#22c55e",
+    bg: DARK ? "#17181d" : "#fbfbfc",
+    bg2: DARK ? "#1f2127" : "#f2f3f6",
+    bg3: DARK ? "#282a32" : "#e9ebf0",
+    text: DARK ? "#e9eaf0" : "#1c2230",
+    sub: DARK ? "#9aa1ad" : "#6b7280",
+    accent: "#4d8dfd",
+    border: DARK ? "#2d3038" : "#e4e7ec",
+    danger: "#f05252",
+    ok: "#34d17c",
   };
 
   // #rrggbb → rgba() 半透明版:毛玻璃底色始终跟随调色板,不硬编码拷贝
@@ -133,6 +135,8 @@
     const n = parseInt(hex.slice(1), 16);
     return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`;
   };
+  C.accentSoft = rgbaOf(C.accent, 0.12); // hover 底色/聚焦微光
+  C.accentRing = rgbaOf(C.accent, 0.28); // 聚焦描边
 
   // 尊重「减少动态效果」系统设置:开启时禁用所有进出场/过渡动画
   const REDUCE_MOTION = matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -143,15 +147,30 @@
 @keyframes wi-pop { from { opacity: 0; transform: translateY(8px) scale(.97) } to { opacity: 1; transform: none } }
 @keyframes wi-fade { from { opacity: 0 } to { opacity: 1 } }
 @keyframes wi-slide { from { opacity: 0; transform: translateY(-6px) } to { opacity: 1; transform: none } }
+@keyframes wi-slide-up { from { opacity: 0; transform: translateY(6px) scale(.98) } to { opacity: 1; transform: none } }
+@keyframes wi-blink { 0%,100% { opacity: 1 } 50% { opacity: 0 } }
+@keyframes wi-spin { to { transform: rotate(360deg) } }
+@keyframes wi-bounce { 0%,80%,100% { transform: translateY(0); opacity: .4 } 40% { transform: translateY(-3px); opacity: 1 } }
+@keyframes wi-pulse { 0%,100% { opacity: 1 } 50% { opacity: .55 } }
 [data-wi-anim="pop"] { animation: wi-pop .18s ease-out both }
 [data-wi-anim="fade"] { animation: wi-fade .18s ease-out both }
 [data-wi-anim="slide"] { animation: wi-slide .18s ease-out both }
 [data-wi-anim="grow"] { animation: wi-pop .16s ease-out both }
+[data-wi-anim="slide-up"] { animation: wi-slide-up .16s ease-out both }
+[data-wi-anim="spin"] { animation: wi-spin .8s linear infinite }
+.wi-dots { display: inline-flex; align-items: center; gap: 3px; vertical-align: -1px }
+.wi-dots span { width: 4px; height: 4px; border-radius: 50%; background: currentColor; animation: wi-bounce 1.2s ease-in-out infinite }
+.wi-dots span:nth-child(2) { animation-delay: .15s }
+.wi-dots span:nth-child(3) { animation-delay: .3s }
+.wi-caret { display: inline-block; width: 2px; height: 1em; background: currentColor; vertical-align: -.15em; margin-left: 2px; animation: wi-blink 1s step-end infinite }
+@media (prefers-reduced-motion: reduce) {
+  [data-wi-anim], .wi-dots span, .wi-caret { animation: none !important }
+}
 `);
   }
   const ANIM = REDUCE_MOTION
-    ? Object.fromEntries(["pop", "fade", "slide", "grow"].map((k) => [k, null]))
-    : { pop: "pop", fade: "fade", slide: "slide", grow: "grow" };
+    ? Object.fromEntries(["pop", "fade", "slide", "grow", "slide-up", "spin"].map((k) => [k, null]))
+    : { pop: "pop", fade: "fade", slide: "slide", grow: "grow", "slide-up": "slide-up", spin: "spin" };
 
   // 挂载进场动画,结束后摘掉标记:fill both 的常驻动画状态可能干扰后代 backdrop-filter(毛玻璃)
   // 只响应元素自身的 animationend,子元素动画冒泡不摘标记;不能用 once,冒泡事件会把监听器白白消耗掉
@@ -176,7 +195,7 @@
       padding: "8px 16px", "border-radius": "8px", "font-size": "13px",
       "z-index": "2147483647", "max-width": "86vw", "box-shadow": "0 4px 16px rgba(0,0,0,0.25)",
     }, msg);
-    playAnim(toastEl, "fade");
+    playAnim(toastEl, "slide");
     document.documentElement.append(toastEl);
     setTimeout(() => { if (toastEl) { toastEl.style.setProperty("opacity", "0"); toastEl.style.setProperty("transition", "opacity .25s ease"); } setTimeout(() => toastEl && toastEl.remove(), 260); }, isError ? 4200 : 2400);
   }
@@ -691,7 +710,7 @@
       right: $storage.get().btnX != null ? "" : "16px",
       bottom: $storage.get().btnY != null ? "" : "96px",
       width: BTN_SIZE + "px", height: BTN_SIZE + "px", "border-radius": "50%",
-      background: `url("${FLOAT_ICON}") center/cover no-repeat, rgba(59,130,246,0.92)`,
+      background: `url("${FLOAT_ICON}") center/cover no-repeat, ${rgbaOf(C.accent, 0.92)}`,
       display: "flex", "align-items": "center", "justify-content": "center",
       cursor: "pointer", "user-select": "none",
       "box-shadow": "0 2px 10px rgba(0,0,0,0.3)", "touch-action": "none",
@@ -742,7 +761,7 @@
     return base ? base + "/userscript.user.js" : "";
   };
   const SCRIPT_VERSION =
-    (typeof GM_info !== "undefined" && GM_info.script && GM_info.script.version) || "0.8.17";
+    (typeof GM_info !== "undefined" && GM_info.script && GM_info.script.version) || "0.8.18";
   let versionCache = null;
 
   function renderVersionFooter(el, v) {
@@ -834,7 +853,9 @@
     injectScrollbarStyle();
     const overlay = h("div", {
       position: "fixed", inset: "0", "z-index": "2147483645",
-      background: "rgba(0,0,0,0.35)", display: "flex",
+      background: REDUCE_TRANSPARENCY ? "rgba(0,0,0,0.5)" : "rgba(0,0,0,0.35)",
+      "backdrop-filter": REDUCE_TRANSPARENCY ? "" : "blur(3px)",
+      display: "flex",
       "align-items": "center", "justify-content": "center",
     });
     playAnim(overlay, "fade");
@@ -849,11 +870,12 @@
     });
     const panel = h("div", {
       width: "min(94vw, 500px)", height: "min(86vh, 720px)",
-      background: C.bg, color: C.text, "border-radius": "14px",
+      background: C.bg, color: C.text, "border-radius": "16px",
+      border: "1px solid " + C.border,
       display: "flex", "flex-direction": "column", overflow: "hidden",
       "font-size": "14px", "line-height": "1.6",
       "font-family": "system-ui,-apple-system,'Segoe UI',Roboto,sans-serif",
-      "box-shadow": "0 12px 48px rgba(0,0,0,0.35)",
+      "box-shadow": "0 24px 72px rgba(0,0,0,0.4)",
       transition: "opacity .18s ease, transform .18s ease",
     }, tabs, body, footer);
     playAnim(panel, "pop");
@@ -863,7 +885,10 @@
       const b = h("button", {
         flex: "1", padding: "12px 0", background: "none", border: "none",
         color: C.sub, "font-size": "14px", cursor: "pointer", "border-bottom": "2px solid transparent",
+        transition: "color .15s ease, border-color .15s ease, background .15s ease",
       }, label);
+      b.addEventListener("mouseenter", () => { if (currentTab !== key) b.style.setProperty("color", C.text); });
+      b.addEventListener("mouseleave", () => { if (currentTab !== key) b.style.setProperty("color", C.sub); });
       b.addEventListener("click", () => switchTab(key));
       tabButtons[key] = b;
       tabs.append(b);
@@ -1849,6 +1874,75 @@
     kbGroups: [],    // 知识库分组列表(来自 /api/groups):持久化一份,分组接口慢/失败时默认范围不至于漏组
   };
 
+  // ---------- 对话显示层动效(只动显示,不加消息字段、不影响落盘) ----------
+
+  // 已播过进场动画的消息:全量重绘不重播(WeakSet 按消息对象,裁剪/恢复历史自然失效)
+  const animedMsgs = new WeakSet();
+  // 打字机 reveal:仅最终回答逐字显示,落盘在 push 时已是完整文本
+  const revealedMsgs = new WeakSet(); // 已完整显示过的消息,重绘/重开面板不重播
+  let revealState = null; // { msg, text, pos, step, started, bubbleText }
+  let revealTimer = null;
+  // 工具卡片展开状态(按 tool_call id):全量重绘后保持展开/折叠
+  const expandedCalls = new Set();
+
+  function stopReveal() {
+    if (revealTimer) { clearTimeout(revealTimer); revealTimer = null; }
+    revealState = null;
+  }
+
+  // 开启打字机:每 tick 增量按总长缩放,整段约 2s 内放完,长回答不拖沓
+  function startReveal(msg) {
+    if (REDUCE_MOTION) return;
+    const step = Math.max(2, Math.ceil(msg.content.length / 90));
+    revealState = { msg, text: msg.content, pos: 0, step, started: false };
+  }
+
+  function revealTick() {
+    revealTimer = null;
+    if (!revealState) return;
+    revealState.pos = Math.min(revealState.text.length, revealState.pos + revealState.step);
+    const bt = revealState.bubbleText;
+    if (bt && bt.isConnected) {
+      const near = chatNearBottom(); // 更新前先看是否贴底:贴底才跟随,上翻阅读不被拽走
+      bt.textContent = revealState.text.slice(0, revealState.pos);
+      if (near) chatPinBottom();
+    }
+    if (revealState.pos >= revealState.text.length) {
+      revealedMsgs.add(revealState.msg);
+      revealState = null;
+    } else {
+      revealTimer = setTimeout(revealTick, 24);
+    }
+  }
+
+  // 智能滚动:距底 >80px 视为用户在上翻,不自动跟随(fake DOM 数值缺省时贴底,行为不变)
+  function chatNearBottom() {
+    if (!chatDom || !chatDom.msgs.isConnected) return true;
+    const { msgs } = chatDom;
+    const gap = msgs.scrollHeight - msgs.scrollTop - (msgs.clientHeight || 0);
+    return !(gap > 80);
+  }
+  function chatPinBottom() {
+    if (chatDom && chatDom.msgs.isConnected) chatDom.msgs.scrollTop = chatDom.msgs.scrollHeight;
+  }
+
+  // 状态行:thinking 时前置三点弹跳 + 整行微光呼吸;空文本清空(含动画)
+  function setChatStatus(text, thinking) {
+    const st = chatDom && chatDom.status;
+    if (!st || !st.isConnected) return;
+    st.replaceChildren();
+    st.style.removeProperty("animation");
+    if (!text) return;
+    if (thinking && !REDUCE_MOTION) {
+      const dots = document.createElement("span");
+      dots.className = "wi-dots";
+      for (let i = 0; i < 3; i++) dots.append(document.createElement("span"));
+      st.append(dots, document.createTextNode(" "));
+      st.style.setProperty("animation", "wi-pulse 1.6s ease-in-out infinite");
+    }
+    st.append(document.createTextNode(text));
+  }
+
   function saveChatState() {
     try {
       GM_setValue(CHAT_SESSION_KEY, {
@@ -1903,6 +1997,7 @@
 
   function resetChatSession() {
     archiveCurrentSession(); // 有实际对话内容才归档,新会话不丢上一段
+    stopReveal(); // 打字机指向旧会话消息:立即停,防孤儿 tick
     if (chat.running) {
       // 运行中重置:立即交还控制权,旧循环凭 runId 丢弃收尾
       chat.abort = true;
@@ -2136,11 +2231,9 @@
         const finalCall = modelCalls >= CHAT_LIMITS.modelCalls;
         const forceText = forcedFinal || finalCall;
         // 非流式等待期间给出阶段提示,长时间无输出不等于死机
-        if (chatDom && chatDom.status && chatDom.status.isConnected) {
-          chatDom.status.textContent = forceText
-            ? "⏳ 资料已读取,正在生成最终回答(长文可能需要 1~2 分钟)…"
-            : `⏳ 等待模型响应…(第 ${modelCalls} 次)`;
-        }
+        setChatStatus(forceText
+          ? "资料已读取,正在生成最终回答(长文可能需要 1~2 分钟)…"
+          : `等待模型响应…(第 ${modelCalls} 次)`, true);
         chatAbort = gmFetch("POST", "/api/chat", {
           messages: msgs,
           tools: CHAT_TOOLS,
@@ -2187,7 +2280,9 @@
           continue;
         }
 
-        msgs.push({ role: "assistant", content: String(m.content || "").trim() || "(模型返回了空回答)" });
+        const ans = { role: "assistant", content: String(m.content || "").trim() || "(模型返回了空回答)" };
+        msgs.push(ans); // 落盘即完整文本;打字机只负责显示层逐字放出
+        if (!chat.abort && ans.content !== "(模型返回了空回答)") startReveal(ans);
         break;
       }
     } catch (e) {
@@ -2216,16 +2311,91 @@
     if (chatAbort) chatAbort.abort();
   }
 
-  // 会话渲染:user/assistant 气泡、工具状态行、引用来源;全部 textContent,资料内容不当 HTML
+  // 工具调用卡片:状态图标(在途转圈/完成 ✓/出错 ⚠) + 名称与参数 + 右侧状态字;
+  // 结束默认折叠为一行,点击展开详情。详情保留旧状态行文案(📄 读取…),引用收集语义不变
+  function buildToolCard(tc, res, titleById) {
+    const fn = tc.function || {};
+    const name = fn.name || "工具";
+    let label = name;
+    const detail = [];
+    try {
+      const a = JSON.parse(fn.arguments || "{}");
+      if (a.query) label += ":" + a.query;
+      if (a.item_id) { // 引用显示条目标题而非裸 ID;工具结果→索引都没有才退回 ID
+        const t = titleById.get(a.item_id)
+          || (kbMeta ? (kbMeta.items.find((it) => it.id === a.item_id) || {}).title : "")
+          || a.item_id;
+        label += ":" + (t.length > 18 ? t.slice(0, 18) + "…" : t);
+        detail.push("条目: " + t);
+      }
+      if (a.cursor) detail.push("分段游标: " + a.cursor);
+    } catch { /* 展示用,解析失败就显示原名 */ }
+    let icon = "—", iconColor = C.sub, stateText = "未完成";
+    if (!res && chat.running) { icon = "◐"; iconColor = C.accent; stateText = "运行中"; }
+    else if (res) {
+      let r = {};
+      try { r = JSON.parse(res.content); } catch { /* 容错展示 */ }
+      if (r && r.error) {
+        icon = "⚠"; iconColor = C.danger; stateText = "出错";
+        detail.push("⚠ " + r.error);
+      } else {
+        icon = "✓"; iconColor = C.ok; stateText = "完成";
+        const n = (Array.isArray(r.items) ? r.items.length : 0) + (Array.isArray(r.hits) ? r.hits.length : 0);
+        if (n) detail.push("返回 " + n + " 条");
+        if (r && r.id) { // 旧状态行文案原样保留
+          const title = r.title ? "《" + String(r.title).slice(0, 40) + "》" : "";
+          detail.push("📄 读取" + title + (r.truncated ? "(已截断)" : "") + (r.total_chars ? " 共" + r.total_chars + "字" : ""));
+        }
+        if (r && r.note) detail.push("ℹ " + r.note);
+      }
+    }
+    const iconEl = h("span", { "flex-shrink": "0", width: "14px", "text-align": "center", color: iconColor, "font-size": "11px" }, icon);
+    if (!res && chat.running && ANIM.spin) iconEl.setAttribute("data-wi-anim", "spin"); // 在途转圈
+    const head = h("div", { display: "flex", "align-items": "center", gap: "6px" },
+      iconEl,
+      h("span", { flex: "1", "min-width": "0", overflow: "hidden", "text-overflow": "ellipsis", "white-space": "nowrap" }, label),
+      h("span", { "flex-shrink": "0", "font-size": "10px", color: C.sub }, stateText));
+    const card = h("div", {
+      "max-width": "94%", margin: "4px 0", padding: "6px 9px",
+      "border-radius": "9px", background: C.bg2, border: "1px solid " + C.border,
+      "font-size": "12px", cursor: res ? "pointer" : "default",
+      transition: "border-color .15s ease",
+    }, head);
+    card.title = res ? "点击展开/收起详情" : name;
+    card.addEventListener("mouseenter", () => { if (res) card.style.setProperty("border-color", C.accentRing); });
+    card.addEventListener("mouseleave", () => card.style.setProperty("border-color", C.border));
+    const detailBox = h("div", {
+      "margin-top": "5px", padding: "5px 8px", background: C.bg,
+      "border-radius": "7px", "font-size": "11px", color: C.sub,
+      "white-space": "pre-wrap", "word-break": "break-all", display: "none",
+    });
+    for (const line of detail) detailBox.append(h("div", { "margin-top": "2px" }, line));
+    card.append(detailBox);
+    if (res) {
+      // 展开状态存 expandedCalls(按 tool_call id):全量重绘后保持
+      detailBox.style.display = expandedCalls.has(tc.id) ? "block" : "none";
+      card.addEventListener("click", () => {
+        const open = expandedCalls.has(tc.id);
+        if (open) expandedCalls.delete(tc.id); else expandedCalls.add(tc.id);
+        detailBox.style.display = open ? "none" : "block";
+        if (!open) playAnim(detailBox, "fade");
+      });
+    }
+    return card;
+  }
+
+  // 会话渲染:user/assistant 气泡、可折叠工具卡片、引用来源;全部 textContent,资料内容不当 HTML
   // 整体 try/catch:渲染层出错只打日志,绝不能炸掉聊天流程(否则 running 卡死、界面停格)
   function renderChat() {
     try {
       if (!chatDom || !chatDom.msgs.isConnected) return;
       const { msgs, status, sendBtn, input, composer } = chatDom;
+      const wasNear = chatNearBottom(); // 重绘前判断贴底:贴底才自动跟随,上翻阅读不被拽走
       // 发送/停止合一:空闲 ➤ 发送,运行中 ■ 停止
       sendBtn.textContent = chat.running ? "■" : "➤";
       sendBtn.style.setProperty("background", chat.running ? C.danger : C.accent);
       sendBtn.title = chat.running ? "停止" : "发送";
+      sendBtn.style.setProperty("opacity", !chat.running && !input.value.trim() ? "0.45" : "1"); // 空输入降级
       if (historyBtnEl && historyBtnEl.isConnected) {
         const n = loadChatHistory().length;
         historyBtnEl.textContent = chat.view === "history" ? "返回对话" : (n ? `历史(${n})` : "历史");
@@ -2249,42 +2419,55 @@
           for (const it of Array.isArray(r.hits) ? r.hits : []) if (it && it.id && it.title) titleById.set(it.id, it.title);
         } catch { /* 展示用,解析失败跳过 */ }
       }
+      // 预扫 tool_call_id → 结果消息:工具卡片配对(在途调用无结果 → 转圈)
+      const resultByCall = new Map();
+      for (const m of chat.messages) if (m.role === "tool" && m.tool_call_id) resultByCall.set(m.tool_call_id, m);
+      const renderedCalls = new Set(); // 已被卡片消费的 tool 消息,主循环跳过
+      // 只给「本会话新出现」的消息播进场动画:全量重绘不重播(WeakSet 按消息对象)
+      const markAnim = (el, m, name) => {
+        if (!animedMsgs.has(m)) { animedMsgs.add(m); playAnim(el, name); }
+      };
       const seenIds = new Set(); // 本次渲染内的引用去重(渲染是全量重绘,按次收集)
       let refs = []; // 当前 assistant 回答的引用(自上一条回答后被 read 的条目)
       for (const m of chat.messages) {
         if (m.role === "system") continue;
         if (m.role === "user") {
-          msgs.append(h("div", {
+          const bubble = h("div", {
             "max-width": "88%", "margin-left": "auto", "margin-bottom": "8px",
-            padding: "8px 10px", "border-radius": "10px", "white-space": "pre-wrap",
+            padding: "8px 11px", "border-radius": "14px 4px 14px 14px", "white-space": "pre-wrap",
             "font-size": "13px", background: C.accent, color: "#fff",
-          }, m.content));
+            "line-height": "1.6", "word-break": "break-word",
+          }, m.content);
+          markAnim(bubble, m, "slide-up");
+          msgs.append(bubble);
           continue;
         }
         if (m.role === "assistant") {
           if (Array.isArray(m.tool_calls)) {
             for (const tc of m.tool_calls) {
-              const fn = tc.function || {};
-              let label = fn.name || "工具";
-              try {
-                const a = JSON.parse(fn.arguments || "{}");
-                if (a.query) label += ":" + a.query;
-                if (a.item_id) { // 引用显示条目标题而非裸 ID;工具结果→索引都没有才退回 ID
-                  const t = titleById.get(a.item_id)
-                    || (kbMeta ? (kbMeta.items.find((it) => it.id === a.item_id) || {}).title : "")
-                    || a.item_id;
-                  label += ":" + (t.length > 18 ? t.slice(0, 18) + "…" : t);
-                }
-              } catch { /* 展示用,解析失败就显示原名 */ }
-              msgs.append(h("div", { "font-size": "11px", color: C.sub, margin: "4px 0" }, "🛠 " + label));
+              renderedCalls.add(tc.id);
+              const card = buildToolCard(tc, resultByCall.get(tc.id), titleById);
+              markAnim(card, m, "fade");
+              msgs.append(card);
             }
             continue;
           }
+          const isReveal = revealState && revealState.msg === m && !revealedMsgs.has(m);
+          const shown = isReveal ? revealState.text.slice(0, revealState.pos) : m.content;
+          const textNode = document.createTextNode(shown);
           const wrap = h("div", {
-            "max-width": "94%", "margin-bottom": "10px", padding: "8px 10px",
-            "border-radius": "10px", "white-space": "pre-wrap", "font-size": "13px",
-            background: C.bg2, color: C.text,
-          }, m.content);
+            "max-width": "94%", "margin-bottom": "10px", padding: "8px 11px",
+            "border-radius": "4px 14px 14px 14px", "white-space": "pre-wrap", "font-size": "13px",
+            background: C.bg2, color: C.text, border: "1px solid " + C.border,
+            "line-height": "1.6", "word-break": "break-word",
+          }, textNode);
+          if (isReveal) { // 打字机:占位光标逐字放出;气泡文本节点直接持有,tick 局部更新不重绘
+            const caret = document.createElement("span");
+            caret.className = "wi-caret";
+            wrap.append(caret);
+            revealState.bubbleText = textNode;
+            if (!revealState.started) { revealState.started = true; revealTimer = setTimeout(revealTick, 24); }
+          }
           if (refs.length) {
             // 引用锚点直接持有元素引用构建,不用 lastChild 回找(文本节点上没有 querySelector,曾致渲染中断)
             const refBox = h("div", { "margin-top": "6px", "font-size": "11px", color: C.sub }, "来源:");
@@ -2303,26 +2486,41 @@
             wrap.append(refBox);
             refs = [];
           }
+          markAnim(wrap, m, "pop");
           msgs.append(wrap);
           continue;
         }
-        // tool 消息 → 状态行 + 收集引用
-        let r = {};
-        try { r = JSON.parse(m.content); } catch { /* 容错展示 */ }
+        // tool 消息:已被卡片消费则跳过展示,但引用收集必须照做(read 过的条目要出现在来源里)
+        let r0 = {};
+        try { r0 = JSON.parse(m.content); } catch { /* 容错 */ }
+        if (r0 && r0.id && !r0.error && !seenIds.has(r0.id)) {
+          seenIds.add(r0.id);
+          const meta0 = (kbMeta ? kbMeta.items.find((it) => it.id === r0.id) : null) || {};
+          refs.push({ id: r0.id, title: meta0.title || r0.title || r0.id, url: meta0.url || r0.url || "" });
+        }
+        if (m.tool_call_id && renderedCalls.has(m.tool_call_id)) continue;
+        const r = r0;
         const title = r && r.title ? "《" + String(r.title).slice(0, 40) + "》" : "";
         msgs.append(h("div", { "font-size": "11px", color: r && r.error ? C.danger : C.sub, margin: "3px 0" },
           r && r.error ? "⚠ " + r.error : "📄 读取" + title + (r.truncated ? "(已截断)" : "") + (r.total_chars ? " 共" + r.total_chars + "字" : "")));
-        if (r && r.id && !r.error && !seenIds.has(r.id)) {
-          seenIds.add(r.id);
-          const meta = (kbMeta ? kbMeta.items.find((it) => it.id === r.id) : null) || {};
-          refs.push({ id: r.id, title: meta.title || r.title || r.id, url: meta.url || r.url || "" });
-        }
+      }
+      // 空状态:还没有任何提问时给居中引导
+      if (!chat.messages.some((x) => x.role === "user")) {
+        const hero = h("div", {
+          display: "flex", "flex-direction": "column", "align-items": "center",
+          gap: "6px", padding: "48px 20px 24px", "text-align": "center", color: C.sub, "font-size": "12px",
+        },
+          h("div", { "font-size": "34px", opacity: "0.9" }, "💬"),
+          h("div", { "font-size": "15px", "font-weight": "600", color: C.text }, "向知识库提问"),
+          h("div", {}, "助手会先搜索、再按需读取资料原文作答;先在下方选好范围"));
+        playAnim(hero, "fade");
+        msgs.append(hero);
       }
       // 状态行(运行中/引导)
-      if (chat.running) status.textContent = "⏳ 助手工作中…";
-      else if (chat.messages.length) status.textContent = "";
-      else status.textContent = "选择范围后提问。助手会先搜索、再按需读取资料原文作答。";
-      msgs.scrollTop = msgs.scrollHeight;
+      if (chat.running) setChatStatus("助手工作中…", true);
+      else if (chat.messages.length) setChatStatus("", false);
+      else setChatStatus("选择范围后提问。助手会先搜索、再按需读取资料原文作答。", false);
+      if (wasNear) chatPinBottom();
     } catch (e) {
       console.error("[webbin] renderChat 渲染异常:", e);
     }
@@ -2342,10 +2540,19 @@
         display: "flex", "align-items": "center", gap: "10px",
         padding: "10px 12px", "margin-top": "8px",
         background: C.bg2, border: `1px solid ${C.border}`, "border-radius": "10px",
-        cursor: "pointer", transition: "border-color .12s ease",
+        cursor: "pointer", transition: "border-color .15s ease, transform .15s ease, box-shadow .15s ease",
       });
-      card.addEventListener("mouseenter", () => card.style.setProperty("border-color", C.accent));
-      card.addEventListener("mouseleave", () => card.style.setProperty("border-color", C.border));
+      card.addEventListener("mouseenter", () => {
+        card.style.setProperty("border-color", C.accent);
+        card.style.setProperty("transform", "translateY(-1px)");
+        card.style.setProperty("box-shadow", "0 4px 14px rgba(0,0,0,0.18)");
+      });
+      card.addEventListener("mouseleave", () => {
+        card.style.setProperty("border-color", C.border);
+        card.style.setProperty("transform", "");
+        card.style.setProperty("box-shadow", "");
+      });
+      playAnim(card, "fade");
       card.addEventListener("click", () => {
         if (chat.historyId === s.id) { // 当前会话就是这条历史:直接回到对话,不归档不回滚(旧快照会覆盖掉新消息)
           chat.view = "chat";
@@ -2421,10 +2628,16 @@
       topRow.replaceChildren();
       const mini = (label, fn, tip) => {
         const b = h("button", {
-          padding: "4px 9px", "border-radius": "6px", cursor: "pointer", "font-size": "12px",
+          padding: "4px 9px", "border-radius": "7px", cursor: "pointer", "font-size": "12px",
           border: "1px solid " + C.border, background: "transparent", color: C.text,
+          transition: "background .15s ease, border-color .15s ease, transform .12s ease",
         }, label);
         b.title = tip || label;
+        b.addEventListener("mouseenter", () => b.style.setProperty("background", C.bg2));
+        b.addEventListener("mouseleave", () => b.style.setProperty("background", "transparent"));
+        b.addEventListener("mousedown", () => b.style.setProperty("transform", "scale(.96)"));
+        b.addEventListener("mouseup", () => b.style.setProperty("transform", ""));
+        b.addEventListener("mouseleave", () => b.style.removeProperty("transform"));
         b.addEventListener("click", fn);
         return b;
       };
@@ -2446,7 +2659,13 @@
         padding: "4px 10px", "border-radius": "14px", cursor: "pointer", "font-size": "12px",
         border: "1px solid " + (on ? C.accent : C.border),
         background: on ? C.accent : "transparent", color: on ? "#fff" : C.text,
+        transition: "background .15s ease, color .15s ease, border-color .15s ease, transform .12s ease",
       }, text);
+      c.addEventListener("mouseenter", () => { if (!on) c.style.setProperty("background", C.bg2); });
+      c.addEventListener("mouseleave", () => { if (!on) c.style.setProperty("background", "transparent"); });
+      c.addEventListener("mousedown", () => c.style.setProperty("transform", "scale(.95)"));
+      c.addEventListener("mouseup", () => c.style.setProperty("transform", ""));
+      c.addEventListener("mouseleave", () => c.style.removeProperty("transform"));
       c.addEventListener("click", onClick);
       return c;
     };
@@ -2463,7 +2682,9 @@
       // 不再按小按钮定位——按按钮定位在窄屏会跑出面板外(0.8.10 资料面板跳到屏幕左边的根因)
       const panel = h("div", {
         position: "absolute", left: "10px", right: "10px", bottom: "50px",
-        background: C.bg, border: "1px solid " + C.border, "border-radius": "12px",
+        background: REDUCE_TRANSPARENCY ? C.bg : rgbaOf(C.bg, 0.92),
+        "backdrop-filter": REDUCE_TRANSPARENCY ? "" : "blur(12px)",
+        border: "1px solid " + C.border, "border-radius": "12px",
         "box-shadow": "0 10px 32px rgba(0,0,0,0.35)", padding: "10px",
         "max-height": "min(430px, 55vh)", overflow: "auto",
         "z-index": "30", display: "none",
@@ -2480,6 +2701,7 @@
       if (show) {
         renderDropPanel(key);
         drops[key].panel.style.display = "block";
+        playAnim(drops[key].panel, "slide-up"); // 展开动画(playAnim 结束后摘标记,不干扰 backdrop-filter)
       }
     }
     function closeDrops() {
@@ -2659,11 +2881,25 @@
     input.setAttribute("rows", "2");
     input.placeholder = "就所选范围提问…(Enter 发送,Shift+Enter 换行)";
     input.value = chat.input || "";
-    input.addEventListener("input", () => { chat.input = input.value; });
+    input.addEventListener("input", () => { chat.input = input.value; autoGrow(); });
+    // 自动增高:按内容撑开,封顶约 6 行,超出内部滚动
+    function autoGrow() {
+      input.style.setProperty("height", "auto");
+      input.style.setProperty("height", Math.min(input.scrollHeight, 132) + "px");
+    }
+    // 聚焦微光:composer 边框亮起 + 柔和外圈
+    input.addEventListener("focus", () => {
+      composer.style.setProperty("border-color", C.accent);
+      composer.style.setProperty("box-shadow", "0 0 0 3px " + C.accentSoft);
+    });
+    input.addEventListener("blur", () => {
+      composer.style.setProperty("border-color", C.border);
+      composer.style.setProperty("box-shadow", "");
+    });
     input.addEventListener("keydown", (e) => {
       if (e.key === "Enter" && !e.shiftKey) {
         e.preventDefault();
-        if (!chat.running) chatSend().then(() => { input.value = chat.input || ""; })
+        if (!chat.running) chatSend().then(() => { input.value = chat.input || ""; autoGrow(); })
           .catch((e) => { console.error("[webbin] chatSend:", e); toast("发送出错: " + e.message, true); });
       }
     });
@@ -2700,11 +2936,16 @@
       width: "38px", height: "38px", "border-radius": "50%", cursor: "pointer",
       border: "none", background: C.accent, color: "#fff", "font-size": "16px",
       "flex-shrink": "0", "line-height": "1",
+      transition: "background .15s ease, transform .12s ease, opacity .15s ease",
     }, "➤");
     sendBtn.title = "发送";
+    sendBtn.addEventListener("mouseenter", () => sendBtn.style.setProperty("transform", "scale(1.06)"));
+    sendBtn.addEventListener("mouseleave", () => sendBtn.style.setProperty("transform", ""));
+    sendBtn.addEventListener("mousedown", () => sendBtn.style.setProperty("transform", "scale(.94)"));
+    sendBtn.addEventListener("mouseup", () => sendBtn.style.setProperty("transform", ""));
     sendBtn.addEventListener("click", () => {
       if (chat.running) return chatStop();
-      chatSend().then(() => { input.value = chat.input || ""; })
+      chatSend().then(() => { input.value = chat.input || ""; autoGrow(); })
         .catch((e) => { console.error("[webbin] chatSend:", e); toast("发送出错: " + e.message, true); });
     });
 
@@ -2800,9 +3041,18 @@
       width: "100%", "box-sizing": "border-box", padding: "8px 10px",
       "border-radius": "8px", border: `1px solid ${C.border}`,
       background: C.bg2, color: C.text, "font-size": "14px",
+      transition: "border-color .15s ease, box-shadow .15s ease",
     });
     i.value = value || "";
     i.placeholder = placeholder || "";
+    i.addEventListener("focus", () => {
+      i.style.setProperty("border-color", C.accent);
+      i.style.setProperty("box-shadow", "0 0 0 3px " + C.accentSoft);
+    });
+    i.addEventListener("blur", () => {
+      i.style.setProperty("border-color", C.border);
+      i.style.setProperty("box-shadow", "");
+    });
     return i;
   }
 

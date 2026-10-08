@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Webbin UI Preview</title>
+<style>
+  html, body { margin: 0; height: 100%; }
+  body { background: linear-gradient(135deg, #7c8aa5 0%, #47566b 100%); }
+</style>
+</head>
+<body>
+<script>
+// ===== 预览专用 GM_* 模拟:仅本地视觉验收用,不参与构建/部署 =====
+(function () {
+  // ?theme=dark|light 强制配色(调色板按加载时的系统偏好求值一次)
+  // ?noanim 强制减少动态效果:截图确定性(面板入场动画在后台标签会被节流停在 opacity 0)
+  const theme = new URLSearchParams(location.search).get("theme");
+  const noanim = new URLSearchParams(location.search).has("noanim");
+  if (theme || noanim) {
+    const orig = window.matchMedia.bind(window);
+    window.matchMedia = (q) => {
+      if (/prefers-color-scheme/.test(q) && theme) {
+        return { matches: theme === "dark", media: q, addEventListener() {}, removeEventListener() {} };
+      }
+      if (/prefers-reduced-motion/.test(q) && noanim) {
+        return { matches: true, media: q, addEventListener() {}, removeEventListener() {} };
+      }
+      return orig(q);
+    };
+  }
+  const store = new Map();
+  const ITEM = (id, title, summary) => ({
+    id, title, url: "https://example.com/post/" + id, site: "example.com",
+    type: "web", group_id: id === "a1" ? "g1" : "g2", created_at: 1,
+    has_content: true, summary,
+  });
+  const ITEMS = [
+    ITEM("a1", "React 19 升级指南:Actions 与新 Hooks", "React 19 引入 Actions、use() 与 ref 作为 prop 等变化…"),
+    ITEM("a2", "useRef 深入:当前值与渲染时机的坑", "useRef 的 .current 变化不会触发重渲染…"),
+    ITEM("a3", "2026 前端构建工具横评", "Vite、Rspack、Turbopack 的取舍…"),
+  ];
+  const FULL = Object.fromEntries(ITEMS.map((m) => [m.id, { ...m, content: "React 19 全文内容:这是用于预览的示例正文,验证分段读取与引用展示。".repeat(4) }]));
+  const TOOLCALL = (id, name, args) => ({ id, type: "function", function: { name, arguments: JSON.stringify(args) } });
+  // 预置一段带工具卡片的会话(内存权威:页面冷启动时从持久化恢复)
+  store.set("worker", "https://preview.local");
+  store.set("token", "preview");
+  store.set("models_cache", ["glm-4.7", "deepseek-chat"]);
+  store.set("models_cache_at", Date.now());
+  store.set("chat_session_v1", {
+    mode: "groups",
+    groups: ["default", "g1"],
+    itemIds: [],
+    model: "",
+    running: false,
+    historyId: "h1",
+    kbGroups: [{ id: "g1", name: "前端" }, { id: "g2", name: "AI 工具" }],
+    messages: [
+      { role: "system", content: "(系统提示词,正常不渲染)" },
+      { role: "user", content: "React 19 有哪些值得升级的变化?useRef 有什么要注意的坑?" },
+      { role: "assistant", content: "", tool_calls: [
+        TOOLCALL("t1", "search_kb", { query: "React 19" }),
+        TOOLCALL("t2", "read_item", { item_id: "a2" }),
+      ] },
+      { role: "tool", tool_call_id: "t1", content: JSON.stringify({ coverage: "标题+总结(正文需 read_item 确认)", note: "无命中不代表正文里没有答案", hits: [{ id: "a1", title: "React 19 升级指南:Actions 与新 Hooks", score: 0.9, url: "https://example.com/post/a1" }] }) },
+      { role: "tool", tool_call_id: "t2", content: JSON.stringify({ id: "a2", title: "useRef 深入:当前值与渲染时机的坑", total_chars: 8420, truncated: true }) },
+      { role: "assistant", content: "React 19 值得升级的变化主要有四点:\n\n1. Actions:表单异步操作成为一等公民,pending 状态内置,不再需要手写 isSubmitting。\n2. use() API:可以在组件里直接读取 Promise 与 Context,配合 Suspense 使用。\n3. ref 可以直接作为 prop 传递,不再需要 forwardRef。\n4. 文档元数据原生支持,<title>/<meta> 可以提升到组件树里声明。\n\nuseRef 的坑:.current 的变更不会触发重渲染,把「渲染后才该出现的内容」挂在 ref 上会出现首帧空白;需要在提交后读取 DOM 时,应放在 useEffect 里而不是渲染期执行。\n\n更多细节见下方来源。" },
+    ],
+    saved_at: Date.now(),
+  });
+  store.set("chat_history_v1", [
+    { id: "h1", title: "React 19 有哪些值得升级的变化", mode: "groups", groups: ["default", "g1"], itemIds: [], model: "", updated_at: Date.now() - 3600e3, messages: [{ role: "user", content: "旧会话示例" }] },
+    { id: "h2", title: "构建工具怎么选:Vite 还是 Rspack", mode: "items", groups: [], itemIds: ["a3"], model: "deepseek-chat", updated_at: Date.now() - 86400e3, messages: [{ role: "user", content: "旧会话示例 2" }] },
+  ]);
+
+  window.GM_getValue = (k, d) => (store.has(k) ? store.get(k) : d);
+  window.GM_setValue = (k, v) => store.set(k, v);
+  window.GM_deleteValue = (k) => store.delete(k);
+  window.GM_addStyle = (css) => { const s = document.createElement("style"); s.textContent = css; document.head.append(s); };
+  window.GM_info = { script: { version: "0.8.18" } };
+  window.GM_registerMenuCommand = () => {};
+
+  let chatCalls = 0;
+  window.GM_xmlhttpRequest = (d) => {
+    const respond = (status, body) => Promise.resolve().then(() => d.onload && d.onload({ status, responseText: typeof body === "string" ? body : JSON.stringify(body) }));
+    let p = "";
+    try { p = new URL(d.url).pathname; } catch { /* 忽略 */ }
+    if (p.endsWith("/userscript.user.js")) { respond(200, "// ==UserScript==\n// @version 0.8.18\n// ==/UserScript=="); return { abort() {} }; }
+    if (p === "/api/kb/metadata") { respond(200, { total: ITEMS.length, items: ITEMS, next_cursor: null }); return { abort() {} }; }
+    if (p === "/api/groups") { respond(200, { groups: [{ id: "g1", name: "前端" }, { id: "g2", name: "AI 工具" }] }); return { abort() {} }; }
+    if (p === "/api/models") { respond(200, { models: ["glm-4.7", "deepseek-chat"], current: "glm-4.7" }); return { abort() {} }; }
+    if (p.startsWith("/api/item/")) { respond(200, FULL[p.split("/").pop()] || { error: "not found" }); return { abort() {} }; }
+    if (p === "/api/chat") {
+      // 演示一轮:先工具调用(思考点/转圈可见),再最终回答(打字机可见)
+      chatCalls++;
+      setTimeout(() => {
+        if (chatCalls === 1) {
+          respond(200, { choices: [{ message: { role: "assistant", content: "", tool_calls: [TOOLCALL("n1", "search_kb", { query: "React 19 新特性" })] } }] });
+        } else {
+          respond(200, { choices: [{ message: { role: "assistant", content: "好的,这是一段演示回答:React 19 的 Actions 让表单异步操作更简单,use() 让读 Promise 更自然。\n\n这段文字会以打字机效果逐字出现,光标闪烁到结束为止。" } }] });
+        }
+      }, chatCalls === 1 ? 1400 : 900);
+      return { abort() {} };
+    }
+    respond(404, { error: "preview mock: not found " + p });
+    return { abort() {} };
+  };
+})();
+</script>
+<script>
+// cache-buster:预览迭代时避免浏览器内存缓存用到旧脚本
+document.write('<script src="../userscript/webbin.user.js?v=' + Date.now() + '"><\/script>');
+</script>
+<script>
+// 预览驱动:自动打开面板并切到 ?tab= 指定的 Tab(chat 默认;history 打开对话内历史列表)
+window.addEventListener("load", () => {
+  setTimeout(() => {
+    const ball = document.querySelector('[title="Webbin 收集箱"]');
+    if (!ball) return;
+    ball.dispatchEvent(new PointerEvent("pointerdown", { clientX: 0, clientY: 0, pointerId: 1 }));
+    ball.dispatchEvent(new PointerEvent("pointerup", { clientX: 0, clientY: 0, pointerId: 1 }));
+    const tab = new URLSearchParams(location.search).get("tab") || "chat";
+    setTimeout(() => {
+      const clickBtn = (pred) => {
+        const b = [...document.querySelectorAll("button")].find(pred);
+        if (b) b.click();
+      };
+      if (tab === "save") clickBtn((b) => b.textContent.trim() === "当前页");
+      else if (tab === "list") clickBtn((b) => b.textContent.trim() === "已保存");
+      else if (tab === "settings") clickBtn((b) => b.textContent.trim() === "设置");
+      else if (tab === "history") {
+        clickBtn((b) => b.textContent.trim() === "对话");
+        setTimeout(() => clickBtn((b) => b.textContent.trim().startsWith("历史")), 250);
+      }
+    }, 250);
+  }, 150);
+});
+</script>
+</body>
+</html>
