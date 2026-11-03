@@ -1,9 +1,9 @@
 // ==UserScript==
 // @name         Webbin 收集箱
 // @name:en      Webbin Saver
-// @description  保存网页正文/B站视频到自己的 Cloudflare Worker,双端 Edge 可用;B站视频可抓取字幕/评论,AI 总结、分组管理与知识库对话(工具调用 Agent)、下载归档
+// @description  保存网页正文/B站视频到自己的 Cloudflare Worker,双端 Edge 可用;B站视频可抓取字幕/评论、UP主主页按时间范围批量抓字幕、批量保存多个网址,AI 总结、分组管理与知识库对话(工具调用 Agent)、下载归档
 // @namespace    https://github.com/local/webbin
-// @version      0.8.18
+// @version      0.9.0
 // @updateURL    /userscript.user.js
 // @author       you
 // @match        *://*/*
@@ -207,21 +207,36 @@
     return BILI_RE.test(location.href);
   }
 
-  function htmlToLines(html) {
-    const div = document.createElement("div");
-    div.innerHTML = html;
+  // 从任意容器/解析后的 Document 收集正文行(批量抓取时容器来自 DOMParser)
+  function collectLinesFrom(root) {
     const lines = [];
-    div.querySelectorAll("p,h1,h2,h3,h4,li,pre,blockquote").forEach((n) => {
+    if (!root || !root.querySelectorAll) return lines;
+    root.querySelectorAll("p,h1,h2,h3,h4,li,pre,blockquote").forEach((n) => {
       const t = (n.textContent || "").trim();
       if (t) lines.push(t);
     });
     // 表格行 → "单元格 | 单元格",保证数据表不被丢弃
-    div.querySelectorAll("table tr").forEach((tr) => {
+    root.querySelectorAll("table tr").forEach((tr) => {
       const cells = [...tr.querySelectorAll("th,td")].map((c) => (c.textContent || "").trim());
       const row = cells.join(" | ").replace(/(\s*\|\s*)+/g, " | ").trim();
       if (row && row !== "|") lines.push(row);
     });
     return lines;
+  }
+
+  function htmlToLines(html) {
+    const div = document.createElement("div");
+    div.innerHTML = html;
+    return collectLinesFrom(div);
+  }
+
+  // 把 Readability 返回的 HTML 片段转成文本行;优先 DOMParser,避免严格 CSP 站点拦截 innerHTML
+  function htmlStringToLines(html) {
+    if (typeof DOMParser !== "undefined") {
+      const d = new DOMParser().parseFromString(String(html || ""), "text/html");
+      return collectLinesFrom(d.body || d);
+    }
+    return htmlToLines(html);
   }
 
   // Readability 只会选"得分最高的一个容器",标签页/表格等结构常被遗漏;
@@ -305,13 +320,102 @@
     return out;
   }
 
+  // ---------- 批量保存:抓取任意网页并提取正文 ----------
+
+  // Readability 失败时的降级提取(解析后的离屏文档版,不依赖当前页面)
+  function fallbackExtractFromDoc(doc, url) {
+    const scores = new Map();
+    for (const p of doc.querySelectorAll("p")) {
+      const len = (p.textContent || "").trim().length;
+      if (len < 20) continue;
+      let node = p.parentElement;
+      for (let i = 0; i < 5 && node; i++, node = node.parentElement) {
+        scores.set(node, (scores.get(node) || 0) + len);
+      }
+    }
+    let best = null, bestScore = 0;
+    for (const [node, score] of scores) if (score > bestScore) { best = node; bestScore = score; }
+    const title = (doc.title || url || "").trim();
+    if (!best) return { title, lines: [] };
+    const lines = [];
+    best.querySelectorAll("p,h1,h2,h3,h4,li").forEach((n) => {
+      const t = (n.textContent || "").trim();
+      if (t.length >= 8) lines.push(t);
+    });
+    return { title, lines: lines.slice(0, 800) };
+  }
+
+  // 离屏文档没有 innerText,用 textContent 统计链接占比,过滤导航/相关推荐
+  function supplementLinesFromRoot(root, lines) {
+    const included = norm(lines.join("\n"));
+    let added = 0;
+    for (const unit of root.querySelectorAll("p,li,tr,h1,h2,h3,h4,blockquote,figcaption,dt,dd")) {
+      if (unit.closest && unit.closest(NOISE_SEL)) continue;
+      let text;
+      if (unit.tagName === "TR") {
+        text = [...unit.querySelectorAll("th,td")]
+          .map((c) => norm(c.textContent)).filter(Boolean).join(" | ");
+      } else {
+        text = (unit.textContent || "").trim();
+      }
+      if (!text || norm(text).length < 4 || norm(text).length > 3000) continue;
+      if (included.includes(norm(text))) continue;
+      const total = norm(text).length;
+      let linkLen = 0;
+      for (const a of unit.querySelectorAll("a")) linkLen += norm(a.textContent).length;
+      if (total && linkLen / total > 0.7) continue;
+      lines.push(text);
+      added++;
+    }
+    return added;
+  }
+
+  function extractArticleFromHtml(html, url) {
+    if (typeof DOMParser === "undefined") throw new Error("当前浏览器不支持网页解析");
+    const doc = new DOMParser().parseFromString(String(html || ""), "text/html");
+    if (!doc || !doc.body) throw new Error("页面内容为空");
+    doc.querySelectorAll("script,style,noscript").forEach((n) => n.remove());
+    let out = null;
+    try {
+      if (typeof Readability !== "undefined") {
+        const clone = doc.cloneNode(true);
+        const article = new Readability(clone).parse();
+        if (article && article.content) {
+          out = {
+            title: (article.title || doc.title || url || "").trim(),
+            lines: htmlStringToLines(article.content),
+          };
+        }
+      }
+    } catch (e) { /* 走降级 */ }
+    // Readability 偶尔会返回一个没有 p/li 等可读单元的容器,此时仍要走降级
+    if (!out || !out.lines.length) out = fallbackExtractFromDoc(doc, url);
+    const base = out.lines.length;
+    out.added = supplementLinesFromRoot(doc.body, out.lines);
+    out.base = base;
+    return out;
+  }
+
+  async function fetchArticleFromUrl(url) {
+    const r = await gmRequest(url, { timeout: 35000 });
+    if (r.status && r.status >= 400) throw new Error(`网页返回 HTTP ${r.status}`);
+    const finalUrl = r.finalUrl || url;
+    const out = extractArticleFromHtml(r.responseText || "", finalUrl);
+    if (!out.lines.length) throw new Error("未提取到正文(可能是纯交互页面或需要登录)");
+    return { ...out, finalUrl };
+  }
+
   // ---------- B站视频:字幕 / 评论提取 ----------
 
   // GM_xmlhttpRequest 封装:绕过页面 CORS/ referer 限制,浏览器 cookie 照常携带
-  function gmRequest(url) {
+  // opts 供批量抓取使用(自定义 Referer/超时/请求方法),单条保存仍走默认参数
+  function gmRequest(url, opts = {}) {
     return new Promise((resolve, reject) => {
       GM_xmlhttpRequest({
-        method: "GET", url, timeout: 30000,
+        method: opts.method || "GET", url,
+        headers: opts.headers || {},
+        data: opts.data,
+        timeout: opts.timeout || 30000,
         onload: resolve,
         onerror: () => reject(new Error("网络请求失败")),
         ontimeout: () => reject(new Error("请求超时")),
@@ -380,13 +484,14 @@
     return out;
   }
 
-  // wbi 签名:与 bilibili-API-collect / PC 端 bilibili_api.py 算法一致
+  // wbi 签名:与 bilibili-API-collect 一致,w_rid = md5(query + mixinKey)
+  // (顺序写反会得到 -352 风控;已用公开测试向量在 test/batch.test.mjs 守住)
   function buildWbiQuery(mixinKey, params, wts) {
     const p = { wts: wts, ...params };
     const query = Object.keys(p).sort()
       .map((k) => encodeURIComponent(k) + "=" + encodeURIComponent(String(p[k]).replace(/[!'()*]/g, "")))
       .join("&");
-    return query + "&w_rid=" + md5(mixinKey + query);
+    return query + "&w_rid=" + md5(query + mixinKey);
   }
 
   // 字幕优先级:人工中文(zh-CN) > AI 中文(ai-zh) > 其他中文 > 任意
@@ -444,10 +549,270 @@
 
   /* WI-PURE-END */
 
-  async function biliApi(path, params) {
+  /* WI-PURE-BEGIN —— 批量保存/UP主时间范围:无 DOM/网络依赖,test/batch.test.mjs 抽取单测 */
+
+  const BILI_BV_RE = /^BV[0-9A-Za-z]{10}$/;
+
+  // 从用户输入/当前地址中解析普通视频页(BV/av,含 p 分P);番剧、空间页等返回 null
+  function parseBiliVideoRef(input) {
+    let s = String(input || "").trim();
+    if (!s) return null;
+    if (BILI_BV_RE.test(s)) return { bvid: s, page: 1 };
+    const bareAv = s.match(/^av(\d+)$/i);
+    if (bareAv) return { bvid: "av" + bareAv[1], page: 1 };
+    if (!/^https?:\/\//i.test(s)) s = "https://" + s;
+    let u;
+    try { u = new URL(s); } catch { return null; }
+    const host = u.hostname.toLowerCase();
+    if (host !== "bilibili.com" && !host.endsWith(".bilibili.com") && host !== "b23.tv") return null;
+    const page = Math.max(1, parseInt(u.searchParams.get("p") || "1", 10) || 1);
+    if (host === "b23.tv") {
+      // b23.tv/BV1xx411c7mD 这种带 BV 的短链可直接解析;纯短码仍交给运行时展开
+      const tok = decodeURIComponent(u.pathname.replace(/^\/+/, ""));
+      if (BILI_BV_RE.test(tok)) return { bvid: tok, page };
+      return null;
+    }
+    const m = u.pathname.match(/\/video\/([^/]+)/i);
+    if (!m) return null;
+    const tok = decodeURIComponent(m[1]);
+    if (BILI_BV_RE.test(tok)) return { bvid: tok, page };
+    if (/^av\d+$/i.test(tok)) return { bvid: tok.toLowerCase(), page };
+    return null;
+  }
+
+  // space.bilibili.com/<mid> 或 /<mid>/upload/video 等子页面
+  function spaceMidFromPath(pathname) {
+    const m = String(pathname || "").match(/^\/(\d+)(?:\/|$)/);
+    return m ? m[1] : "";
+  }
+
+  function tryHttpUrl(s) {
+    try {
+      const u = new URL(s);
+      return /^https?:$/.test(u.protocol) ? u : null;
+    } catch {
+      return null;
+    }
+  }
+
+  // 去掉复制网址时粘上的包裹/句末标点。只剥“不平衡”的右括号,
+  // 这样 Wikipedia 的 Mercury_(planet) 这类合法 URL 不会被截断。
+  function trimUrlEdges(raw) {
+    let s = String(raw || "").trim().replace(/^[(\[{<]+/, "");
+    // 主机名末尾的 FQDN 句点(example.com. / example.com.:8080)按浏览器习惯去掉
+    s = s.replace(/^(https?:\/\/[^\/?#]+?[^\/?#.:])\.(?=:[0-9]+|[\/?#]|$)/i, "$1");
+    const zhTail = "。，；、！？：”’";
+    // 全角括号只在“右括号多于左括号”时剥掉;成对出现时属于 URL 内容
+    const zhPairs = { "）": "（", "】": "【", "》": "《", "」": "「", "』": "『" };
+    for (let guard = 0; guard < 16 && s; guard++) {
+      const last = s[s.length - 1];
+      if (zhTail.includes(last) || last === "," || last === ";") {
+        s = s.slice(0, -1);
+        continue;
+      }
+      // 开括号(含全角)出现在末尾必然失衡——它的闭括号不可能再出现,直接剥掉
+      if ("([{<（【《「『".includes(last)) {
+        s = s.slice(0, -1);
+        continue;
+      }
+      const zhOpen = zhPairs[last];
+      if (zhOpen) {
+        const opens = (s.match(new RegExp("\\" + zhOpen, "g")) || []).length;
+        const closes = (s.match(new RegExp("\\" + last, "g")) || []).length;
+        if (closes > opens) { s = s.slice(0, -1); continue; }
+      }
+      // Markdown 链接后的 ")." / ")!":先去掉句末标点,下一轮再按不平衡括号处理
+      if (".,:!?".includes(last) && ")]}>".includes(s[s.length - 2] || "")) {
+        s = s.slice(0, -1);
+        continue;
+      }
+      if (last === ")" || last === "]" || last === "}") {
+        const open = last === ")" ? "(" : last === "]" ? "[" : "{";
+        const opens = (s.match(new RegExp("\\" + open, "g")) || []).length;
+        const closes = (s.match(new RegExp("\\" + last, "g")) || []).length;
+        if (closes > opens) { s = s.slice(0, -1); continue; }
+      }
+      if (last === ">" && !s.includes("<")) { s = s.slice(0, -1); continue; }
+      // URL 本身解析不了时,末尾常见标点多半是句末符号;能解析就原样保留
+      if (!tryHttpUrl(s) && ".,:!?".includes(last)) { s = s.slice(0, -1); continue; }
+      break;
+    }
+    const u = tryHttpUrl(s);
+    // 域名末尾多出的英文句点(example.com.)
+    if (u && u.hostname.endsWith(".") && u.pathname === "/" && !u.search && !u.hash) {
+      s = s.slice(0, -1);
+    }
+    return s;
+  }
+
+  // 单条网址归一化:补协议、去包裹标点;裸 BV/av 号转成视频链接
+  function normalizeBatchUrl(raw) {
+    let s = String(raw || "").trim().replace(/^[(\[{<]+/, "");
+    if (!s) return "";
+    if (BILI_BV_RE.test(s)) return "https://www.bilibili.com/video/" + s;
+    if (/^av\d+$/i.test(s)) return "https://www.bilibili.com/video/" + s.toLowerCase();
+    if (/^b23\.tv\//i.test(s)) s = "https://" + s;
+    else if (!/^https?:\/\//i.test(s)) {
+      // 没有协议时只接受像域名的输入,避免把说明文字误当网址。
+      // 末尾允许一个 FQDN 句点(example.com.),后面可接端口、路径、查询或锚点
+      if (!/^(?:www\.)?[a-z0-9-]+(?:\.[a-z0-9-]+)+\.?(?::\d+)?(?:[\/?#]|$)/i.test(s)) return "";
+      s = "https://" + s;
+    }
+    s = trimUrlEdges(s);
+    const u = tryHttpUrl(s);
+    if (!u || u.username || u.password) return "";
+    return u.href;
+  }
+
+  // 文本里的网址:一行可以放多个;支持裸 BV/av 号和裸域名;忽略空行和 # 注释行
+  function parseBatchUrls(text) {
+    const out = [];
+    const seen = new Set();
+    const add = (raw) => {
+      const url = normalizeBatchUrl(raw);
+      if (!url || seen.has(url)) return;
+      seen.add(url);
+      out.push(url);
+    };
+    const re = /(?:https?:\/\/|www\.|b23\.tv\/)[^\s<>"'`]+|\bBV[0-9A-Za-z]{10}\b|\bav\d+\b/gi;
+    // 分隔符右侧看起来像新网址时才当分隔符;否则保留(如 ?q=你好，世界 里的全角逗号)
+    const isSep = /[，。；、！？：（）【】《》“”‘’,;]/;
+    // 右侧文本的“新网址起始”类型:scheme=http(s) 开头;host=裸域名/www./b23./BV/av
+    const urlStartKind = (s) => {
+      const t = String(s || "").replace(/^\s+/, "");
+      if (/^https?:\/\//i.test(t)) return "scheme";
+      if (/^BV[0-9A-Za-z]{10}\b/.test(t)) return "host";
+      if (/^av\d+\b/i.test(t)) return "host";
+      if (/^(?:www\.|b23\.tv\/)/i.test(t)) return "host";
+      if (/^(?:www\.)?[a-z0-9-]+(?:\.[a-z0-9-]+)+\.?(?::\d+)?(?:[\/?#，。；、！？：,;）】》]|$)/i.test(t)) return "host";
+      return "";
+    };
+    const markSeps = (line) => {
+      let outLine = "";
+      for (let i = 0; i < line.length; i++) {
+        outLine += line[i];
+        if (!isSep.test(line[i])) continue;
+        let j = i + 1;
+        while (j < line.length && /\s/.test(line[j])) j++;
+        const kind = urlStartKind(line.slice(j));
+        if (!kind) continue;
+        // 左侧已在查询串/锚点内部(?或#之后无空白)时,右侧的裸域名/BV/av 样式
+        // 多半是参数内容而不是新网址(如 ?q=你好，b.com/x);scheme 开头仍切分
+        if (kind !== "scheme" && /[?#][^\s]*$/.test(line.slice(0, i))) continue;
+        outLine += " ";
+      }
+      return outLine;
+    };
+    const addLoose = (chunk) => {
+      // 英文逗号/分号只在后面有空白时当分隔符,避免把 ?q=a,b 这类合法查询参数拆开
+      for (const tok of String(chunk || "").split(/\s+|,(?=\s|$)|;(?=\s|$)/)) {
+        const t = tok.trim();
+        if (t) add(t);
+      }
+    };
+    for (const line0 of String(text || "").split(/\r?\n/)) {
+      const line = line0.trim();
+      if (!line || line.startsWith("#")) continue;
+      const scan = markSeps(line);
+      let last = 0, m;
+      while ((m = re.exec(scan))) {
+        add(m[0]);
+        addLoose(scan.slice(last, m.index));
+        last = re.lastIndex;
+      }
+      addLoose(scan.slice(last));
+    }
+    return out;
+  }
+
+  // web | bili-video | bili-short | bili-other | invalid
+  function classifyBatchUrl(raw) {
+    const url = normalizeBatchUrl(raw) || String(raw || "").trim();
+    if (parseBiliVideoRef(url)) return "bili-video";
+    try {
+      const host = new URL(/^https?:\/\//i.test(url) ? url : "https://" + url).hostname.toLowerCase();
+      if (host === "b23.tv") return "bili-short";
+      if (host === "bilibili.com" || host.endsWith(".bilibili.com")) return "bili-other";
+      return "web";
+    } catch {
+      return "invalid";
+    }
+  }
+
+  // 本地日期(不是 UTC):date input 的 YYYY-MM-DD
+  function dateToInput(ms) {
+    const d = new Date(ms);
+    if (Number.isNaN(d.getTime())) return "";
+    const p = (n) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+  }
+
+  function dateInputToMs(value, endOfDay) {
+    const m = String(value || "").match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (!m) return null;
+    const y = Number(m[1]), mo = Number(m[2]) - 1, d = Number(m[3]);
+    const out = new Date(y, mo, d, endOfDay ? 23 : 0, endOfDay ? 59 : 0,
+      endOfDay ? 59 : 0, endOfDay ? 999 : 0);
+    if (out.getFullYear() !== y || out.getMonth() !== mo || out.getDate() !== d) return null;
+    return out.getTime();
+  }
+
+  // 时间范围预设:起点按本地自然日,终点含今天整天;custom 用传入的两个日期
+  function rangePresetBounds(preset, now, startInput, endInput) {
+    const base = new Date(now || Date.now());
+    const endMs = new Date(base.getFullYear(), base.getMonth(), base.getDate(), 23, 59, 59, 999).getTime();
+    const daysAgoStart = (days) =>
+      new Date(base.getFullYear(), base.getMonth(), base.getDate() - days).getTime();
+    let startMs;
+    if (preset === "7d") startMs = daysAgoStart(6);
+    else if (preset === "30d") startMs = daysAgoStart(29);
+    else if (preset === "90d") startMs = daysAgoStart(89);
+    else if (preset === "1y") startMs = new Date(base.getFullYear() - 1, base.getMonth(), base.getDate()).getTime();
+    else if (preset === "custom") {
+      startMs = dateInputToMs(startInput, false);
+      const customEnd = dateInputToMs(endInput, true);
+      if (startMs == null || customEnd == null || startMs > customEnd) return null;
+      return { startMs, endMs: customEnd, start: dateToInput(startMs), end: dateToInput(customEnd) };
+    } else return null;
+    return { startMs, endMs, start: dateToInput(startMs), end: dateToInput(endMs) };
+  }
+
+  function videoInRange(createdSec, startMs, endMs) {
+    const t = Number(createdSec) * 1000;
+    return Number.isFinite(t) && t >= startMs && t <= endMs;
+  }
+
+  // 过滤一页投稿(按发布时间倒序)。firstPage 时跳过开头的旧置顶(可能不止一条),
+  // 不据此判“已到更早内容”;但整页都是旧内容时仍要判到,避免旧投稿账号被翻穿 40 页。
+  function filterUpVideoPage(list, bounds, firstPage) {
+    const videos = [];
+    let reachedOlder = false;
+    let skippedLeadingOld = false;
+    for (let i = 0; i < list.length; i++) {
+      const v = list[i];
+      if (!videoInRange(v.created, bounds.startMs, bounds.endMs)) {
+        if (Number(v.created) * 1000 < bounds.startMs) {
+          if (firstPage && !videos.length) { skippedLeadingOld = true; continue; }
+          reachedOlder = true;
+          break;
+        }
+        continue;
+      }
+      videos.push(v);
+    }
+    if (firstPage && skippedLeadingOld && !videos.length) reachedOlder = true;
+    return { videos, reachedOlder };
+  }
+
+  /* WI-PURE-END */
+
+  async function biliApi(path, params, opts = {}) {
     const mixinKey = await getWbiKey();
     const qs = buildWbiQuery(mixinKey, params, Math.floor(Date.now() / 1000));
-    const r = await gmRequest("https://api.bilibili.com" + path + "?" + qs);
+    const r = await gmRequest("https://api.bilibili.com" + path + "?" + qs, {
+      headers: opts.headers || {},
+      timeout: opts.timeout || 30000,
+    });
     let j;
     try { j = JSON.parse(r.responseText); } catch { throw new Error("B站接口返回了非 JSON 内容"); }
     if (j.code === 0) return j.data;
@@ -462,6 +827,9 @@
 
   // nav 接口本身不签名(否则与 biliApi 互相等待造成死锁)
   let wbiKeyPromise = null;
+  // nav 响应里的登录状态:AI 字幕列表只有登录(有效 SESSDATA)才会下发,
+  // 字幕为空报错时用它区分“未登录”与“真没有 CC 字幕”。每次页面加载检测一次。
+  let biliLogin = null;
   function getWbiKey() {
     if (!wbiKeyPromise) {
       const p = gmRequest("https://api.bilibili.com/x/web-interface/nav").then((r) => {
@@ -469,6 +837,7 @@
         try { j = JSON.parse(r.responseText); } catch { throw new Error("B站接口返回了非 JSON 内容"); }
         // 未登录时 nav 返回 -101,但 wbi_img 照常下发,只看数据在不在
         if (!j.data || !j.data.wbi_img) throw new Error(`获取 wbi key 失败[${j.code}]`);
+        biliLogin = !!j.data.isLogin;
         const stem = (u) => (u || "").split("/").pop().replace(/\.(png|webp)$/, "");
         const raw = stem(j.data.wbi_img.img_url) + stem(j.data.wbi_img.sub_url);
         return MIXIN_TAB.map((i) => raw[i]).join("").slice(0, 32);
@@ -489,6 +858,13 @@
     if (/^BV[0-9A-Za-z]{10}$/.test(tok)) return { bvid: tok, page };
     if (/^av\d+$/i.test(tok)) return { bvid: tok.toLowerCase(), page };
     return null;
+  }
+
+  // B站 UP 主空间页(space.bilibili.com/<mid>):提供按时间范围批量抓字幕
+  function getBiliSpacePage() {
+    if (String(location.hostname || "") !== "space.bilibili.com") return null;
+    const mid = spaceMidFromPath(location.pathname);
+    return mid ? { mid } : null;
   }
 
   // 视频信息(aid/cid/标题/UP/分P),同一次面板会话内缓存
@@ -529,7 +905,12 @@
     const v = await getView(vp);
     const data = await biliApi("/x/player/wbi/v2", { aid: v.aid, bvid: v.bvid, cid: v.cid });
     const chosen = pickSubtitle((data.subtitle && data.subtitle.subtitles) || []);
-    if (!chosen) throw new Error("没有可用字幕(视频无 CC 字幕,或未登录看不到 AI 字幕)");
+    if (!chosen) {
+      // 批量与单条走的是同一个接口:未登录时只有人工 CC 字幕会下发,AI 字幕列表为空
+      throw new Error(biliLogin === false
+        ? "B站未登录:该视频没有公开 CC 字幕,AI 字幕要登录后才能获取,请登录 B 站后重试"
+        : "该视频没有可用字幕:无 CC 字幕,B站也未生成 AI 字幕(部分视频不会生成;若画面里直接印着字幕,那是硬字幕,无法提取)");
+    }
     const r = await gmRequest(String(chosen.subtitle_url).replace(/^\/\//, "https://"));
     let body;
     try { body = JSON.parse(r.responseText).body || []; } catch { throw new Error("字幕文件解析失败"); }
@@ -541,6 +922,17 @@
       stat: `已抓取字幕 ${lines.length} 段(${lanLabel(chosen.lan)})`,
       content: head.text + "\n\n" + lines.join("\n"),
     };
+  }
+
+  // 批量场景复用单条字幕抓取:抓完直接写入收集箱,返回标题与统计
+  async function collectBiliSubtitle(bvid, page = 1) {
+    const r = await saveBiliSubtitle({ bvid, page });
+    const title = `${r.baseTitle} · ${r.suffix}`;
+    const saved = await gmFetch("POST", "/api/save", {
+      url: r.url, title, site: "www.bilibili.com", type: "bilibili", content: r.content,
+    });
+    savedLocal.unshift(saved);
+    return { title, stat: r.stat, saved };
   }
 
   // 评论主接口(网页版同款):按热度 + 游标分页;风控(-352)时带着已抓到的返回
@@ -648,6 +1040,184 @@
         (needFull.length ? ` + 楼中楼 ${replyTotal} 条` : ""),
       content: head.text + "\n\n" + blocks.join("\n\n"),
     };
+  }
+
+  // ---------- 批量任务:UP主投稿列表 / 多网址保存 ----------
+
+  const UP_BATCH_MAX = 300;   // 单次最多处理视频数,避免一次写入过多 KV
+  const BATCH_SAVE_MAX = 500; // 单次最多网址数
+  const UP_PAGE_SIZE = 50;
+  const UP_MAX_PAGES = 40;    // 最多扫描 2000 个投稿,防止异常账号把页码拉穿
+  const UP_EST_PAGES = Math.ceil(UP_BATCH_MAX / UP_PAGE_SIZE); // 预计数量最多扫的页数(扫到单次上限即可)
+
+  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+  // 批量开始前先确认 Worker 地址/Token 可用,避免抓取几百条后才发现全存不进去。
+  // 返回空字符串表示可用,否则返回可直接展示的错误原因。
+  async function ensureWorkerReady() {
+    const { worker, token } = $storage.get();
+    if (!worker || !token) {
+      const msg = "请先在设置中填写 Worker 地址和 Token";
+      toast(msg, true);
+      return msg;
+    }
+    try {
+      await gmFetch("GET", "/api/settings", null, { timeout: 15000 });
+      return "";
+    } catch (e) {
+      const msg = "Worker 连接失败: " + (e.message || e);
+      toast(msg, true);
+      return msg;
+    }
+  }
+
+  // 有界并发:批量字幕/网页保存共用。worker 内部必须自行 catch,否则会中断整批
+  async function runPool(items, limit, worker) {
+    let next = 0;
+    const runners = [];
+    const n = Math.max(1, Math.min(limit, items.length));
+    for (let k = 0; k < n; k++) {
+      runners.push((async () => {
+        while (true) {
+          const i = next++;
+          if (i >= items.length) return;
+          await worker(items[i], i);
+        }
+      })());
+    }
+    // allSettled:某个 runner 意外 reject 时,等其余 runner 收尾后再抛错,
+    // 避免外层 finally 先置 running=false、后台请求却还在跑
+    const results = await Promise.allSettled(runners);
+    const bad = results.find((r) => r.status === "rejected");
+    if (bad) {
+      // 非 Error 的 reject 原因(字符串/对象)统一转成有可读 message 的 Error
+      const reason = bad.reason;
+      const msg = reason instanceof Error ? reason.message
+        : reason && typeof reason === "object" && typeof reason.message === "string"
+          ? reason.message
+          : String(reason);
+      throw reason instanceof Error ? reason : new Error(msg);
+    }
+  }
+
+  // UP 主投稿列表(按发布时间倒序);未登录时带上 dm_img 系列参数降低 -352 概率
+  async function fetchUpVideoPage(mid, pn) {
+    const params = {
+      mid, ps: UP_PAGE_SIZE, tid: 0, pn, keyword: "", order: "pubdate",
+      platform: "web", web_location: 1550101, order_avoided: "true",
+      dm_img_list: "[]",
+      dm_img_str: "V2ViR0wgMS4wIChPcGVuR0wgRVMgMi4wIENocm9taXVtKQ",
+      dm_cover_img_str: "QU5HTEUgKEludGVsIEluYy4sIEludGVsIElyaXMgUHJvIE9wZW5HTCBFbmdpbmUsIE9wZW5HTCA0LjEpR29vZ2xlIEluYy4gKEludGVsIEluYy",
+      dm_img_inter: '{"ds":[],"wh":[0,0,0],"of":[0,0,0]}',
+    };
+    return biliApi("/x/space/wbi/arc/search", params, {
+      headers: { referer: `https://space.bilibili.com/${mid}/video` },
+      timeout: 30000,
+    });
+  }
+
+  // 按时间范围翻页拉投稿;到起始时间/数量上限/用户停止即结束。
+  // maxPages 供“预计数量”用小页数快速估算,正式抓取仍用 UP_MAX_PAGES
+  async function fetchUpVideos(mid, bounds, max, onProgress, shouldStop, maxPages = UP_MAX_PAGES) {
+    const videos = [];
+    const seen = new Set();
+    let total = null, pages = 0, truncated = false, pageLimit = false, partialError = "";
+    const stopped = () => !!(shouldStop && shouldStop());
+    for (let pn = 1; pn <= maxPages; pn++) {
+      if (stopped()) return { videos, total, pages, truncated, pageLimit, partialError, aborted: true };
+      pages = pn;
+      onProgress && onProgress(`读取投稿列表 第 ${pn} 页…`);
+      let data;
+      try {
+        data = await fetchUpVideoPage(mid, pn);
+      } catch (e) {
+        if (!videos.length) throw e;
+        partialError = e.message;
+        break;
+      }
+      if (data.page && data.page.count != null) total = data.page.count;
+      const list = (data.list && data.list.vlist) || [];
+      if (!list.length) break;
+      const filtered = filterUpVideoPage(list, bounds, pn === 1);
+      for (const v of filtered.videos) {
+        const key = String(v.bvid || ("aid:" + v.aid));
+        if (seen.has(key)) continue; // 置顶视频可能同时出现在时间序位置
+        seen.add(key);
+        videos.push(v);
+        if (videos.length >= max) { truncated = true; break; }
+      }
+      if (filtered.reachedOlder || truncated) break;
+      const info = data.page || {};
+      if (info.pn && info.ps && info.count != null && info.pn * info.ps >= info.count) break;
+      if (list.length < UP_PAGE_SIZE) break;
+      if (pn >= maxPages) { pageLimit = true; break; }
+      if (stopped()) return { videos, total, pages, truncated, pageLimit, partialError, aborted: true };
+      await sleep(200);
+    }
+    return { videos, total, pages, truncated, pageLimit, partialError, aborted: false };
+  }
+
+  async function resolveB23Url(url) {
+    const r = await gmRequest(url, { timeout: 20000 });
+    if (r.status && r.status >= 400) throw new Error(`短链返回 HTTP ${r.status}`);
+    const finalUrl = String(r.finalUrl || r.responseURL || "");
+    if (!finalUrl || /^https?:\/\/b23\.tv\//i.test(finalUrl)) {
+      throw new Error("短链解析失败,请改用完整视频链接");
+    }
+    return finalUrl;
+  }
+
+  // 并发去重:同一个键只允许一个任务执行。重复项等待首个任务的结果;
+  // 首个失败时重新抢占并重试,而不会因为“曾经有人占位”而永久跳过。
+  async function dedupeTask(seenRefs, key, title, skipStat, start) {
+    if (seenRefs) {
+      while (true) {
+        const prev = seenRefs.get(key);
+        if (!prev) break;
+        try {
+          await prev;
+          return { skipped: true, title, stat: skipStat };
+        } catch {
+          // 失败后若已有别的任务重新占位就继续等它,否则由本任务重试
+          if (seenRefs.get(key) === prev) break;
+        }
+      }
+    }
+    const task = start();
+    if (seenRefs) seenRefs.set(key, task);
+    return task;
+  }
+
+  // 批量保存单条网址:普通网页存正文,B站普通视频存字幕
+  // seenRefs 是 Map<去重键, Promise>,用于在短链解析后按视频/最终网页去重
+  async function saveBatchUrl(rawUrl, seenRefs) {
+    let url = normalizeBatchUrl(rawUrl);
+    if (!url) throw new Error("网址格式不正确");
+    if (classifyBatchUrl(url) === "bili-short") url = await resolveB23Url(url);
+    const ref = parseBiliVideoRef(url);
+    if (ref) {
+      const key = ref.bvid + ":" + ref.page;
+      return dedupeTask(seenRefs, key, url, "重复视频,已跳过",
+        () => collectBiliSubtitle(ref.bvid, ref.page));
+    }
+    if (classifyBatchUrl(url) === "bili-other") {
+      throw new Error("不是普通视频页(BV/av),请单独打开后用「仅存链接」保存");
+    }
+    const art = await fetchArticleFromUrl(url);
+    const title = art.title || url;
+    return dedupeTask(seenRefs, art.finalUrl, title, "重复网页,已跳过", () => (async () => {
+      let host = "";
+      try { host = new URL(art.finalUrl).hostname; } catch { /* 保留空 site */ }
+      const saved = await gmFetch("POST", "/api/save", {
+        url: art.finalUrl,
+        title,
+        site: host || "web",
+        type: "web",
+        content: art.lines.join("\n\n"),
+      });
+      savedLocal.unshift(saved);
+      return { title, stat: `正文 ${art.lines.length} 段` };
+    })());
   }
 
   // ---------- 悬浮按钮 ----------
@@ -761,7 +1331,7 @@
     return base ? base + "/userscript.user.js" : "";
   };
   const SCRIPT_VERSION =
-    (typeof GM_info !== "undefined" && GM_info.script && GM_info.script.version) || "0.8.18";
+    (typeof GM_info !== "undefined" && GM_info.script && GM_info.script.version) || "0.9.0";
   let versionCache = null;
 
   function renderVersionFooter(el, v) {
@@ -938,8 +1508,499 @@
 
   // ---- Tab: 当前页 ----
 
+  // 批量任务状态放模块级:切 Tab / 面板重建时任务继续跑,进度和结果能接上
+  const upBatchState = {
+    running: false, checking: false, cancel: false, aborted: false,
+    total: 0, done: 0, ok: 0, fail: 0, skipped: 0,
+    results: [], status: "", summary: "", error: "",
+    preset: GM_getValue("up_batch_preset", "30d"),
+    start: GM_getValue("up_batch_start", ""),
+    end: GM_getValue("up_batch_end", ""),
+    est: "", estGen: 0, estCacheKey: "", estCacheText: "",
+  };
+  let upBatchDom = null;
+  const batchSaveState = {
+    draft: "", open: GM_getValue("batch_save_open", false),
+    running: false, checking: false, cancel: false, aborted: false,
+    total: 0, done: 0, ok: 0, fail: 0, skipped: 0,
+    results: [], status: "", summary: "", error: "",
+  };
+  let batchSaveDom = null;
+
+  function pushJobResult(st, ok, title, msg) {
+    st.results.push({ ok, title: String(title || ""), msg: String(msg || "") });
+    if (st.results.length > 600) st.results.splice(0, st.results.length - 600);
+  }
+
+  function jobStatusText(st, verb) {
+    if (st.checking) return "正在检查 Worker 连接…";
+    if (st.running && st.cancel) return "正在停止…(等待当前请求结束)";
+    if (!st.running) return st.summary || st.status || "";
+    // 列表扫描阶段还没有 total,显示“读取第 N 页”比 0/? 更有用
+    if (!st.total && st.status) return st.status;
+    return `${verb} ${st.done}/${st.total || "?"} · 成功 ${st.ok}` +
+      (st.fail ? ` · 失败 ${st.fail}` : "") +
+      (st.skipped ? ` · 跳过 ${st.skipped}` : "");
+  }
+
+  function renderJobResults(el, st) {
+    el.replaceChildren();
+    if (!st.results.length) return;
+    const shown = st.results.slice(-100);
+    el.append(h("div", { "font-size": "11px", color: C.sub, margin: "4px 0 2px" },
+      `结果 ${st.results.length} 条` + (st.results.length > shown.length ? `(仅显示最近 ${shown.length} 条)` : "")));
+    for (const r of shown) {
+      el.append(h("div", {
+        "font-size": "11px", "line-height": "1.5", "word-break": "break-all",
+        color: r.ok ? C.text : C.danger,
+      }, `${r.ok ? "✓" : "✗"} ${r.title.slice(0, 80)}${r.msg ? " — " + r.msg.slice(0, 120) : ""}`));
+    }
+  }
+
+  function paintUpBatch() {
+    const d = upBatchDom;
+    // 不要求 isConnected:面板重建时先绘制,再挂载,否则已完成的进度/结果会消失
+    if (!d) return;
+    const st = upBatchState;
+    d.btn.disabled = st.running || st.checking;
+    d.btn.textContent = st.checking ? "⏳ 检查连接…"
+      : st.running ? `⏳ 抓取中 ${st.done}/${st.total || "?"}` : "批量获取视频字幕";
+    d.stopBtn.style.setProperty("display", st.running ? "" : "none");
+    d.stopBtn.disabled = st.cancel;
+    d.stopBtn.textContent = st.cancel ? "正在停止…" : "停止";
+    d.presetSel.disabled = st.running || st.checking;
+    d.startInput.disabled = st.running || st.checking || st.preset !== "custom";
+    d.endInput.disabled = st.running || st.checking || st.preset !== "custom";
+    d.status.textContent = jobStatusText(st, "⏳ 抓取中");
+    d.status.style.setProperty("color",
+      st.running || st.checking ? C.accent : (st.error || st.fail ? C.danger : C.sub));
+    renderJobResults(d.report, st);
+  }
+
+  function paintBatchSave() {
+    const d = batchSaveDom;
+    if (!d) return; // 面板重建时同样先绘制再挂载
+    const st = batchSaveState;
+    d.ta.disabled = st.running || st.checking;
+    d.startBtn.disabled = st.running || st.checking;
+    d.clearBtn.disabled = st.running || st.checking;
+    d.startBtn.textContent = st.checking ? "⏳ 检查连接…"
+      : st.running ? `⏳ 保存中 ${st.done}/${st.total || "?"}` : "开始批量保存";
+    d.stopBtn.style.setProperty("display", st.running ? "" : "none");
+    d.stopBtn.disabled = st.cancel;
+    d.stopBtn.textContent = st.cancel ? "正在停止…" : "停止";
+    d.status.textContent = jobStatusText(st, "⏳ 保存中");
+    d.status.style.setProperty("color",
+      st.running || st.checking ? C.accent : (st.error || st.fail ? C.danger : C.sub));
+    renderJobResults(d.report, st);
+  }
+
+  // ---- UP 批量:日期范围变更后预计范围内投稿数(只扫列表不抓字幕) ----
+
+  function paintEst() {
+    if (upBatchDom) upBatchDom.est.textContent = upBatchState.est;
+  }
+
+  let estTimer = null;
+  function scheduleUpEstimate(mid, delay = 600) {
+    clearTimeout(estTimer);
+    estTimer = setTimeout(() => { runUpEstimate(mid).catch(() => {}); }, delay);
+  }
+
+  async function runUpEstimate(mid) {
+    const st = upBatchState;
+    if (st.running || st.checking || !upBatchDom) return;
+    const bounds = rangePresetBounds(upBatchDom.presetSel.value, Date.now(),
+      upBatchDom.startInput.value, upBatchDom.endInput.value);
+    if (!bounds) { st.est = "日期无效,无法预计"; paintEst(); return; }
+    const key = mid + "|" + bounds.start + "|" + bounds.end;
+    if (st.estCacheKey === key) { st.est = st.estCacheText; paintEst(); return; }
+    const gen = ++st.estGen; // 新的统计会使进行中的旧统计作废
+    st.est = "正在统计范围内投稿…";
+    paintEst();
+    try {
+      const res = await fetchUpVideos(mid, bounds, UP_BATCH_MAX, (msg) => {
+        if (gen !== st.estGen) return;
+        const m = msg.match(/第 (\d+) 页/);
+        st.est = m ? `正在统计…(第 ${m[1]} 页)` : msg;
+        paintEst();
+      }, () => gen !== st.estGen || st.running, UP_EST_PAGES);
+      if (gen !== st.estGen) return; // 已被更新的统计取代
+      if (res.aborted) {
+        if (st.running) { st.est = ""; paintEst(); } // 正式任务已接管,让位给进度行
+        return;
+      }
+      st.est = !res.videos.length ? "该时间范围内没有投稿视频"
+        : `预计 ${res.videos.length} 个视频` +
+          ((res.truncated || res.pageLimit) ? `(已达单次上限 ${UP_BATCH_MAX},实际更多)` : "") +
+          (res.partialError ? `(列表读取中断: ${res.partialError})` : "");
+      st.estCacheKey = key;
+      st.estCacheText = st.est;
+    } catch (e) {
+      // 预检失败(风控/接口变更)只影响预计,不阻塞正式抓取
+      if (gen === st.estGen) st.est = "预计失败: " + (e.message || e);
+    } finally {
+      if (gen === st.estGen) paintEst();
+    }
+  }
+
+  async function runUpBatch(mid, bounds) {
+    const st = upBatchState;
+    st.running = true; st.cancel = false; st.aborted = false; st.error = "";
+    st.total = 0; st.done = 0; st.ok = 0; st.fail = 0; st.skipped = 0;
+    st.results = []; st.status = "读取投稿列表…"; st.summary = "";
+    paintUpBatch();
+    let notes = [];
+    try {
+      const res = await fetchUpVideos(mid, bounds, UP_BATCH_MAX, (msg) => {
+        st.status = msg;
+        paintUpBatch();
+      }, () => st.cancel);
+      if (res.truncated) notes.push(`达到单次上限 ${UP_BATCH_MAX} 个`);
+      if (res.pageLimit) notes.push(`达到翻页上限 ${UP_MAX_PAGES} 页`);
+      if (res.partialError) notes.push(`列表读取中断: ${res.partialError}`);
+      if (st.cancel || res.aborted) {
+        st.aborted = true;
+        return;
+      }
+      if (!res.videos.length) {
+        st.summary = `${bounds.start} ~ ${bounds.end} 内没有投稿视频`;
+        return;
+      }
+      st.total = res.videos.length;
+      st.status = `找到 ${st.total} 个视频,开始抓取字幕…`;
+      paintUpBatch();
+      let streak = 0, lastMsg = "";
+      await runPool(res.videos, 2, async (v) => {
+        if (st.cancel) { st.skipped++; st.done++; paintUpBatch(); return; }
+        try {
+          const r = await collectBiliSubtitle(v.bvid, 1);
+          st.ok++;
+          pushJobResult(st, true, v.title, r.stat);
+          streak = 0; lastMsg = "";
+        } catch (e) {
+          const msg = e.message || String(e);
+          st.fail++;
+          pushJobResult(st, false, v.title, msg);
+          if (msg === lastMsg) streak++; else { streak = 1; lastMsg = msg; }
+          // 连续相同风控/登录/Worker 错误:继续请求只会更难恢复,主动停下
+          if (streak >= 2 && /(风控|登录|-352|-101|token 无效|请先在设置|Worker|HTTP 40[13]|网络错误)/.test(msg)) {
+            st.cancel = true;
+          }
+        } finally {
+          st.done++;
+          paintUpBatch();
+        }
+        if (!st.cancel) await sleep(180);
+      });
+      st.aborted = st.cancel;
+    } catch (e) {
+      st.error = e.message || String(e);
+      st.summary = "批量抓取失败: " + st.error;
+    } finally {
+      const aborted = st.cancel;
+      st.running = false;
+      st.cancel = false;
+      st.aborted = aborted;
+      if (!st.summary) {
+        st.summary = `完成:成功 ${st.ok}` +
+          (st.fail ? `,失败 ${st.fail}` : "") +
+          (st.skipped ? `,跳过 ${st.skipped}` : "") +
+          (aborted ? ",已停止" : "") +
+          (notes.length ? `(${notes.join(";")})` : "");
+      }
+      paintUpBatch();
+      toast(st.summary, !!(st.error || st.fail > 0 || aborted));
+    }
+  }
+
+  async function startUpBatchFromUI(mid) {
+    const st = upBatchState;
+    if (st.running || st.checking) return;
+    const preset = upBatchDom ? upBatchDom.presetSel.value : st.preset;
+    const start = upBatchDom ? upBatchDom.startInput.value : st.start;
+    const end = upBatchDom ? upBatchDom.endInput.value : st.end;
+    const bounds = rangePresetBounds(preset, Date.now(), start, end);
+    if (!bounds) {
+      toast("请选择有效的开始/结束日期", true);
+      return;
+    }
+    st.checking = true;
+    st.error = ""; st.summary = ""; st.status = ""; st.results = [];
+    paintUpBatch();
+    try {
+      const err = await ensureWorkerReady();
+      if (err) {
+        st.error = err;
+        st.summary = "未开始: " + err;
+        return;
+      }
+      st.preset = preset;
+      st.start = bounds.start;
+      st.end = bounds.end;
+      try {
+        GM_setValue("up_batch_preset", preset);
+        GM_setValue("up_batch_start", bounds.start);
+        GM_setValue("up_batch_end", bounds.end);
+      } catch { /* 存储满不影响本次任务 */ }
+      runUpBatch(mid, bounds);
+    } finally {
+      st.checking = false;
+      paintUpBatch();
+    }
+  }
+
+  function buildUpBatchSection(space) {
+    const st = upBatchState;
+    const validPresets = ["7d", "30d", "90d", "1y", "custom"];
+    if (!validPresets.includes(st.preset)) st.preset = "30d";
+    if (st.preset === "custom" && !rangePresetBounds("custom", Date.now(), st.start, st.end)) {
+      st.preset = "30d";
+    }
+    const initial = rangePresetBounds(st.preset, Date.now(), st.start, st.end)
+      || rangePresetBounds("30d", Date.now());
+    if (st.preset !== "custom") {
+      st.start = initial.start;
+      st.end = initial.end;
+    }
+
+    const presetSel = h("select", {
+      flex: "1", "min-width": "130px", padding: "6px 8px", "border-radius": "8px",
+      border: `1px solid ${C.border}`, background: C.bg, color: C.text, "font-size": "12px",
+    },
+      h("option", { value: "7d" }, "最近 7 天"),
+      h("option", { value: "30d" }, "最近 30 天"),
+      h("option", { value: "90d" }, "最近 90 天"),
+      h("option", { value: "1y" }, "最近 1 年"),
+      h("option", { value: "custom" }, "自定义日期"));
+    presetSel.value = st.preset;
+
+    const dateStyle = {
+      flex: "1", "min-width": "120px", padding: "6px 8px", "border-radius": "8px",
+      border: `1px solid ${C.border}`, background: C.bg, color: C.text, "font-size": "12px",
+    };
+    const startInput = h("input", dateStyle);
+    startInput.type = "date";
+    startInput.value = st.start || initial.start;
+    const endInput = h("input", dateStyle);
+    endInput.type = "date";
+    endInput.value = st.end || initial.end;
+
+    // Tab 重建会重新读 st.start/st.end;自定义日期变化时立即同步并落盘
+    const persistRange = () => {
+      try {
+        GM_setValue("up_batch_preset", st.preset);
+        GM_setValue("up_batch_start", st.start);
+        GM_setValue("up_batch_end", st.end);
+      } catch { /* 存储满不影响本次任务 */ }
+    };
+    const syncDateState = () => {
+      startInput.disabled = st.running || st.checking || st.preset !== "custom";
+      endInput.disabled = st.running || st.checking || st.preset !== "custom";
+    };
+    presetSel.addEventListener("change", () => {
+      st.preset = presetSel.value;
+      if (st.preset !== "custom") {
+        const b = rangePresetBounds(st.preset, Date.now());
+        if (b) {
+          st.start = b.start;
+          st.end = b.end;
+          startInput.value = b.start;
+          endInput.value = b.end;
+          persistRange();
+        }
+      }
+      syncDateState();
+      scheduleUpEstimate(space.mid);
+    });
+    const toCustom = () => {
+      st.preset = "custom";
+      st.start = startInput.value;
+      st.end = endInput.value;
+      presetSel.value = "custom";
+      persistRange();
+      syncDateState();
+      scheduleUpEstimate(space.mid);
+    };
+    startInput.addEventListener("change", toCustom);
+    endInput.addEventListener("change", toCustom);
+
+    const btn = mkBtn("批量获取视频字幕", C.accent, true, () => startUpBatchFromUI(space.mid));
+    const stopBtn = mkBtn("停止", C.danger, false, () => {
+      upBatchState.cancel = true;
+      paintUpBatch();
+    });
+    stopBtn.style.setProperty("display", "none");
+    const status = h("div", { "font-size": "12px", color: C.sub, "margin-top": "8px", "min-height": "18px" });
+    const est = h("div", { "font-size": "11px", color: C.sub, "margin-top": "6px", "min-height": "14px" });
+    const report = h("div", { "margin-top": "4px", "max-height": "180px", overflow: "auto" });
+
+    const box = h("div", {
+      "margin-top": "14px", padding: "10px", background: C.bg2,
+      border: `1px solid ${C.border}`, "border-radius": "10px",
+    },
+      h("div", { "font-weight": "600", "font-size": "13px", "margin-bottom": "6px" }, `UP主投稿批量字幕(mid: ${space.mid})`),
+      h("div", { "font-size": "11px", color: C.sub, "margin-bottom": "8px" },
+        "按投稿时间倒序抓取所选范围内的视频字幕,抓到后直接进入收集箱。"),
+      h("div", { display: "flex", gap: "8px", "align-items": "center", "flex-wrap": "wrap" },
+        h("span", { "font-size": "12px", color: C.sub }, "时间范围"), presetSel),
+      h("div", { display: "flex", gap: "6px", "align-items": "center", "margin-top": "6px", "flex-wrap": "wrap" },
+        startInput, h("span", { "font-size": "12px", color: C.sub }, "至"), endInput),
+      est,
+      h("div", { display: "flex", gap: "8px", "margin-top": "8px", "flex-wrap": "wrap" }, btn, stopBtn),
+      status, report,
+      h("div", { "font-size": "11px", color: C.sub, "margin-top": "6px" },
+        `单次最多 ${UP_BATCH_MAX} 个;多P视频只抓第1P;AI 字幕需要浏览器已登录 B 站。`),
+    );
+    upBatchDom = { box, btn, stopBtn, presetSel, startInput, endInput, status, est, report };
+    est.textContent = st.est;
+    syncDateState();
+    paintUpBatch();
+    scheduleUpEstimate(space.mid);
+    return box;
+  }
+
+  async function runBatchSave(urls) {
+    const st = batchSaveState;
+    st.running = true; st.cancel = false; st.aborted = false; st.error = "";
+    st.total = urls.length; st.done = 0; st.ok = 0; st.fail = 0; st.skipped = 0;
+    st.results = []; st.summary = "";
+    paintBatchSave();
+    let streak = 0, lastMsg = "";
+    try {
+      const seenRefs = new Map();
+      await runPool(urls, 3, async (url) => {
+        if (st.cancel) { st.skipped++; st.done++; paintBatchSave(); return; }
+        try {
+          const r = await saveBatchUrl(url, seenRefs);
+          if (r.skipped) {
+            st.skipped++;
+            pushJobResult(st, true, r.title, r.stat);
+          } else {
+            st.ok++;
+            pushJobResult(st, true, r.title, r.stat);
+          }
+          streak = 0; lastMsg = "";
+        } catch (e) {
+          const msg = e.message || String(e);
+          st.fail++;
+          pushJobResult(st, false, url, msg);
+          if (msg === lastMsg) streak++; else { streak = 1; lastMsg = msg; }
+          // Worker/Token 类错误连续出现时不必再抓后面的页面
+          if (streak >= 3 && /(token 无效|请先在设置|Worker|HTTP 40[13]|网络错误)/.test(msg)) {
+            st.cancel = true;
+          }
+        } finally {
+          st.done++;
+          paintBatchSave();
+        }
+        if (!st.cancel) await sleep(100);
+      });
+      st.aborted = st.cancel;
+    } catch (e) {
+      st.error = e.message || String(e);
+      st.summary = "批量保存失败: " + st.error;
+    } finally {
+      const aborted = st.cancel;
+      st.running = false;
+      st.cancel = false;
+      st.aborted = aborted;
+      if (!st.summary) {
+        st.summary = `完成:成功 ${st.ok}` +
+          (st.fail ? `,失败 ${st.fail}` : "") +
+          (st.skipped ? `,跳过 ${st.skipped}` : "") +
+          (aborted ? ",已停止" : "");
+      }
+      paintBatchSave();
+      toast(st.summary, !!(st.error || st.fail > 0 || aborted));
+    }
+  }
+
+  async function startBatchSaveFromUI() {
+    const st = batchSaveState;
+    if (st.running || st.checking) return;
+    const draft = batchSaveDom ? batchSaveDom.ta.value : st.draft;
+    st.draft = draft;
+    const urls = parseBatchUrls(draft);
+    if (!urls.length) {
+      toast("请先输入至少一个有效网址", true);
+      return;
+    }
+    const capped = urls.slice(0, BATCH_SAVE_MAX);
+    if (urls.length > BATCH_SAVE_MAX) toast(`一次最多 ${BATCH_SAVE_MAX} 条,已截取前 ${BATCH_SAVE_MAX} 条`);
+    st.checking = true;
+    st.error = ""; st.summary = ""; st.status = ""; st.results = [];
+    paintBatchSave();
+    try {
+      const err = await ensureWorkerReady();
+      if (err) {
+        st.error = err;
+        st.summary = "未开始: " + err;
+        return;
+      }
+      if (capped.length >= 10 && !confirm(
+        `将批量保存 ${capped.length} 个网址(普通网页存正文,B站视频抓字幕),继续?`,
+      )) return;
+      runBatchSave(capped);
+    } finally {
+      st.checking = false;
+      paintBatchSave();
+    }
+  }
+
+  function buildBatchSaveSection() {
+    const st = batchSaveState;
+    const ta = h("textarea", {
+      width: "100%", "box-sizing": "border-box", padding: "8px 10px",
+      "border-radius": "8px", border: `1px solid ${C.border}`,
+      background: C.bg, color: C.text, "font-size": "12px", resize: "vertical",
+      "font-family": "inherit", "line-height": "1.5", "min-height": "96px",
+    });
+    ta.rows = 5;
+    ta.placeholder = "每行一个网址,可混排网页和 B 站视频;也支持裸 BV 号。\nhttps://example.com/article\nhttps://www.bilibili.com/video/BV1xx411c7mD";
+    ta.value = st.draft;
+    ta.addEventListener("input", () => { st.draft = ta.value; paintBatchSave(); });
+
+    const startBtn = mkBtn("开始批量保存", C.accent, true, startBatchSaveFromUI);
+    const stopBtn = mkBtn("停止", C.danger, false, () => {
+      batchSaveState.cancel = true;
+      paintBatchSave();
+    });
+    stopBtn.style.setProperty("display", "none");
+    const clearBtn = mkBtn("清空", undefined, false, () => {
+      st.draft = "";
+      ta.value = "";
+      paintBatchSave();
+    });
+    const status = h("div", { "font-size": "12px", color: C.sub, "margin-top": "8px", "min-height": "18px" });
+    const report = h("div", { "margin-top": "4px", "max-height": "180px", overflow: "auto" });
+
+    const body = h("div", { "margin-top": "8px" },
+      ta,
+      h("div", { display: "flex", gap: "8px", "margin-top": "8px", "flex-wrap": "wrap" }, startBtn, stopBtn, clearBtn),
+      h("div", { "font-size": "11px", color: C.sub, "margin-top": "6px" },
+        `普通网页提取正文,B站普通视频抓字幕;重复网址自动去重,单次最多 ${BATCH_SAVE_MAX} 条。`),
+      h("div", { "font-size": "11px", color: C.sub, "margin-top": "4px" },
+        "批量抓取会以当前浏览器身份访问目标网页(可能携带该站 Cookie),请只粘贴可信网址。"),
+      status, report,
+    );
+    const root = h("details", {
+      "margin-top": "14px", "padding-top": "10px", "border-top": `1px solid ${C.border}`,
+    }, h("summary", { cursor: "pointer", "font-weight": "600", "font-size": "13px" },
+      "批量保存多个网址(网页正文 / B站字幕)"), body);
+    root.open = !!st.open;
+    root.addEventListener("toggle", () => {
+      st.open = root.open;
+      try { GM_setValue("batch_save_open", st.open); } catch { /* 忽略存储失败 */ }
+    });
+    batchSaveDom = { root, ta, startBtn, stopBtn, clearBtn, status, report };
+    paintBatchSave();
+    return root;
+  }
+
   function buildSaveTab(body) {
     const vp = getBiliVideoPage(); // 普通视频页(BV/av):提供字幕/评论抓取
+    const space = getBiliSpacePage(); // UP 主空间页:提供按时间范围批量抓字幕
     const bili = isBiliPage();
     const titleInput = h("input", {
       width: "100%", "box-sizing": "border-box", padding: "8px 10px",
@@ -1012,6 +2073,19 @@
       btn.disabled = false;
     };
 
+    if (space) {
+      const linkBtn = mkBtn("仅存链接", undefined, false, () => saveLink(linkBtn));
+      body.append(
+        h("div", { "font-weight": "600", "font-size": "14px" }, "B站 UP 主主页"),
+        h("div", { "margin-top": "4px", "font-size": "12px", color: C.sub },
+          "按时间范围批量抓取该 UP 主的投稿视频字幕;普通网页/B站视频的批量保存也在下方。"),
+        h("div", { display: "flex", gap: "8px", "margin-top": "10px", "flex-wrap": "wrap" }, linkBtn),
+        buildUpBatchSection(space),
+        buildBatchSaveSection(),
+      );
+      return;
+    }
+
     if (vp) {
       const subBtn = mkBtn("保存字幕", C.accent, true,
         () => runBiliAction(subBtn, "保存字幕", "⏳ 抓取字幕中", () => saveBiliSubtitle(vp)));
@@ -1025,6 +2099,7 @@
         preview,
         h("div", { "margin-top": "10px", "font-size": "12px", color: C.sub },
           "检测到 B 站视频页:字幕/评论直接抓进收集箱,双端可看、可生成 AI 总结;「仅存链接」保持原行为,由 PC 归档脚本处理。AI 字幕需要在浏览器登录 B 站。"),
+        buildBatchSaveSection(),
       );
       return;
     }
@@ -1090,6 +2165,7 @@
       bili ? h("div", { "margin-top": "10px" }, saveBtn) : "",
       preview,
       hint,
+      buildBatchSaveSection(),
     );
   }
 

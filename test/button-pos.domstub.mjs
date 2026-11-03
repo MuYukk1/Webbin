@@ -85,7 +85,11 @@ function mkStyle(el) {
 // 只关心影响布局的四个属性;其余(position/z-index/背景等)不影响可见性判定
 function layout(el, k, v) { if (["left", "top", "right", "bottom", "width", "height"].includes(k)) el._props[k] = v; }
 
-export function runScript({ innerWidth, innerHeight, storeBox, isMobile = false, faithfulStore = false, dropDeleteApi = false }) {
+export function runScript({
+  innerWidth, innerHeight, storeBox,
+  isMobile = false, faithfulStore = false, dropDeleteApi = false,
+  href = "https://example.com/", title = "t",
+}) {
   // storeBox:跨次加载共享的存储盒(模拟 GM 存储的持久化);
   // faithfulStore:模拟"写 null 会被序列化成字符串"的管理器(如 Greasemonkey 的 JSON 存储)
   if (!storeBox.raw) {
@@ -105,7 +109,7 @@ export function runScript({ innerWidth, innerHeight, storeBox, isMobile = false,
   const menus = [];
   const resizeFns = [];
   const document = {
-    documentElement: docEl, body, head, title: "t",
+    documentElement: docEl, body, head, title,
     createElement: (t) => new El(t),
     createTextNode: (t) => Object.assign(new El("#text"), { textContent: t }),
     querySelectorAll: () => [],
@@ -121,7 +125,8 @@ export function runScript({ innerWidth, innerHeight, storeBox, isMobile = false,
   };
   const env = {
     document,
-    location: { href: "https://example.com/" },
+    location: new URL(href),
+    URL, URLSearchParams, TextEncoder, TextDecoder,
     get innerWidth() { return view.w; },
     set innerWidth(v) { view.w = v; },
     get innerHeight() { return view.h; },
