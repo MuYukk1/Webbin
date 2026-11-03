@@ -42,6 +42,9 @@ console.log("B站视频链接解析");
   eq("空间页不是普通视频", pure.parseBiliVideoRef("https://space.bilibili.com/2"), null);
   eq("b23 纯短码待解析", pure.parseBiliVideoRef("https://b23.tv/abc"), null);
   eq("b23 直带 BV", pure.parseBiliVideoRef("https://b23.tv/BV1xx411c7mD"), { bvid: "BV1xx411c7mD", page: 1 });
+  eq("小写 bv 前缀归一", pure.parseBiliVideoRef("bv1xx411c7mD"), { bvid: "BV1xx411c7mD", page: 1 });
+  eq("小写 bv 的视频链接", pure.parseBiliVideoRef("https://www.bilibili.com/video/bv1xx411c7mD"), { bvid: "BV1xx411c7mD", page: 1 });
+  eq("b23 小写 bv", pure.parseBiliVideoRef("https://b23.tv/bv1xx411c7mD"), { bvid: "BV1xx411c7mD", page: 1 });
 }
 
 console.log("空间页 mid / 网址归一化");
@@ -56,6 +59,7 @@ console.log("空间页 mid / 网址归一化");
   eq("去域名末尾句点(带查询)", pure.normalizeBatchUrl("example.com.?q=1"), "https://example.com/?q=1");
   eq("保留 hash", pure.normalizeBatchUrl("https://example.com/a#part"), "https://example.com/a#part");
   eq("裸 BV 转链接", pure.normalizeBatchUrl("BV1xx411c7mD"), "https://www.bilibili.com/video/BV1xx411c7mD");
+  eq("裸小写 bv 转链接", pure.normalizeBatchUrl("bv1xx411c7mD"), "https://www.bilibili.com/video/BV1xx411c7mD");
   eq("裸 av 转链接", pure.normalizeBatchUrl("av170001"), "https://www.bilibili.com/video/av170001");
   eq("b23 补协议", pure.normalizeBatchUrl("b23.tv/abc"), "https://b23.tv/abc");
   eq("说明文字不误判", pure.normalizeBatchUrl("不是网址"), "");
@@ -113,6 +117,7 @@ console.log("批量输入解析 / 分类");
     "https://e.com/5",
   ]);
   eq("普通视频", pure.classifyBatchUrl("https://www.bilibili.com/video/BV1xx411c7mD"), "bili-video");
+  eq("小写 bv 链接分类为普通视频", pure.classifyBatchUrl("https://www.bilibili.com/video/bv1xx411c7mD"), "bili-video");
   eq("B站短链", pure.classifyBatchUrl("https://b23.tv/abc"), "bili-short");
   eq("B站其他页面", pure.classifyBatchUrl("https://space.bilibili.com/2"), "bili-other");
   eq("普通网页", pure.classifyBatchUrl("https://example.com/a"), "web");
@@ -149,6 +154,9 @@ console.log("批量输入解析 / 分类");
   eq("全角开书名号后跟新网址可切分且开书名号被剥",
     pure.parseBatchUrls("https://a.com/1《https://b.com/2"),
     ["https://a.com/1", "https://b.com/2"]);
+  eq("全角分隔后跟小写 bv 可切分",
+    pure.parseBatchUrls("https://a.com/1，bv1xx411c7mD"),
+    ["https://a.com/1", "https://www.bilibili.com/video/BV1xx411c7mD"]);
 }
 
 console.log("时间范围");

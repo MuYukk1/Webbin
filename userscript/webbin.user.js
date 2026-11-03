@@ -3,7 +3,7 @@
 // @name:en      Webbin Saver
 // @description  保存网页正文/B站视频到自己的 Cloudflare Worker,双端 Edge 可用;B站视频可抓取字幕/评论、UP主主页按时间范围批量抓字幕、批量保存多个网址,AI 总结、分组管理与知识库对话(工具调用 Agent)、下载归档
 // @namespace    https://github.com/local/webbin
-// @version      0.9.0
+// @version      0.9.1
 // @updateURL    /userscript.user.js
 // @author       you
 // @match        *://*/*
@@ -552,12 +552,16 @@
   /* WI-PURE-BEGIN —— 批量保存/UP主时间范围:无 DOM/网络依赖,test/batch.test.mjs 抽取单测 */
 
   const BILI_BV_RE = /^BV[0-9A-Za-z]{10}$/;
+  // BV 号前缀归一为大写(B站接受小写 bv 并重定向);后 10 位大小写敏感,保持原样。
+  // 锚定整体只能是 bv+10 位,避免误伤恰好以 bv 开头的域名等输入
+  const normBvPrefix = (tok) => String(tok || "").replace(/^bv(?=[0-9A-Za-z]{10}$)/i, "BV");
 
   // 从用户输入/当前地址中解析普通视频页(BV/av,含 p 分P);番剧、空间页等返回 null
   function parseBiliVideoRef(input) {
     let s = String(input || "").trim();
     if (!s) return null;
-    if (BILI_BV_RE.test(s)) return { bvid: s, page: 1 };
+    const bareBv = normBvPrefix(s);
+    if (BILI_BV_RE.test(bareBv)) return { bvid: bareBv, page: 1 };
     const bareAv = s.match(/^av(\d+)$/i);
     if (bareAv) return { bvid: "av" + bareAv[1], page: 1 };
     if (!/^https?:\/\//i.test(s)) s = "https://" + s;
@@ -568,13 +572,13 @@
     const page = Math.max(1, parseInt(u.searchParams.get("p") || "1", 10) || 1);
     if (host === "b23.tv") {
       // b23.tv/BV1xx411c7mD 这种带 BV 的短链可直接解析;纯短码仍交给运行时展开
-      const tok = decodeURIComponent(u.pathname.replace(/^\/+/, ""));
+      const tok = normBvPrefix(decodeURIComponent(u.pathname.replace(/^\/+/, "")));
       if (BILI_BV_RE.test(tok)) return { bvid: tok, page };
       return null;
     }
     const m = u.pathname.match(/\/video\/([^/]+)/i);
     if (!m) return null;
-    const tok = decodeURIComponent(m[1]);
+    const tok = normBvPrefix(decodeURIComponent(m[1]));
     if (BILI_BV_RE.test(tok)) return { bvid: tok, page };
     if (/^av\d+$/i.test(tok)) return { bvid: tok.toLowerCase(), page };
     return null;
@@ -649,7 +653,8 @@
   function normalizeBatchUrl(raw) {
     let s = String(raw || "").trim().replace(/^[(\[{<]+/, "");
     if (!s) return "";
-    if (BILI_BV_RE.test(s)) return "https://www.bilibili.com/video/" + s;
+    const bareBv = normBvPrefix(s);
+    if (BILI_BV_RE.test(bareBv)) return "https://www.bilibili.com/video/" + bareBv;
     if (/^av\d+$/i.test(s)) return "https://www.bilibili.com/video/" + s.toLowerCase();
     if (/^b23\.tv\//i.test(s)) s = "https://" + s;
     else if (!/^https?:\/\//i.test(s)) {
@@ -681,7 +686,7 @@
     const urlStartKind = (s) => {
       const t = String(s || "").replace(/^\s+/, "");
       if (/^https?:\/\//i.test(t)) return "scheme";
-      if (/^BV[0-9A-Za-z]{10}\b/.test(t)) return "host";
+      if (/^bv[0-9A-Za-z]{10}\b/i.test(t)) return "host";
       if (/^av\d+\b/i.test(t)) return "host";
       if (/^(?:www\.|b23\.tv\/)/i.test(t)) return "host";
       if (/^(?:www\.)?[a-z0-9-]+(?:\.[a-z0-9-]+)+\.?(?::\d+)?(?:[\/?#，。；、！？：,;）】》]|$)/i.test(t)) return "host";
@@ -1126,7 +1131,10 @@
     for (let pn = 1; pn <= maxPages; pn++) {
       if (stopped()) return { videos, total, pages, truncated, pageLimit, partialError, aborted: true };
       pages = pn;
-      onProgress && onProgress(`读取投稿列表 第 ${pn} 页…`);
+      // 首页请求前还不知道总数;从第 2 页起带出接口给的 UP 主全部投稿数
+      onProgress && onProgress(total != null
+        ? `读取投稿列表 第 ${pn} 页…(该UP共 ${total} 投稿)`
+        : `读取投稿列表 第 ${pn} 页…`);
       let data;
       try {
         data = await fetchUpVideoPage(mid, pn);
@@ -1331,7 +1339,7 @@
     return base ? base + "/userscript.user.js" : "";
   };
   const SCRIPT_VERSION =
-    (typeof GM_info !== "undefined" && GM_info.script && GM_info.script.version) || "0.9.0";
+    (typeof GM_info !== "undefined" && GM_info.script && GM_info.script.version) || "0.9.1";
   let versionCache = null;
 
   function renderVersionFooter(el, v) {
@@ -1659,16 +1667,14 @@
       if (res.truncated) notes.push(`达到单次上限 ${UP_BATCH_MAX} 个`);
       if (res.pageLimit) notes.push(`达到翻页上限 ${UP_MAX_PAGES} 页`);
       if (res.partialError) notes.push(`列表读取中断: ${res.partialError}`);
-      if (st.cancel || res.aborted) {
-        st.aborted = true;
-        return;
-      }
+      if (st.cancel || res.aborted) return; // aborted 由 finally 统一收口
       if (!res.videos.length) {
         st.summary = `${bounds.start} ~ ${bounds.end} 内没有投稿视频`;
         return;
       }
       st.total = res.videos.length;
-      st.status = `找到 ${st.total} 个视频,开始抓取字幕…`;
+      st.status = `找到 ${st.total} 个视频` +
+        (res.total != null ? `(该UP共 ${res.total} 投稿)` : "") + ",开始抓取字幕…";
       paintUpBatch();
       let streak = 0, lastMsg = "";
       await runPool(res.videos, 2, async (v) => {
@@ -1693,7 +1699,6 @@
         }
         if (!st.cancel) await sleep(180);
       });
-      st.aborted = st.cancel;
     } catch (e) {
       st.error = e.message || String(e);
       st.summary = "批量抓取失败: " + st.error;
@@ -1896,7 +1901,6 @@
         }
         if (!st.cancel) await sleep(100);
       });
-      st.aborted = st.cancel;
     } catch (e) {
       st.error = e.message || String(e);
       st.summary = "批量保存失败: " + st.error;

@@ -202,6 +202,14 @@ w_rid = md5(query + mixinKey)
    - 改进：`getWbiKey` 顺带记录 nav 的 `isLogin`（模块级 `biliLogin`），字幕为空的报错区分"未登录"与"确无字幕（部分视频不生成 AI 字幕）"。
 2. **新功能：日期范围预计投稿数**。`fetchUpVideos` 增加 `maxPages` 参数；`runUpEstimate`/`scheduleUpEstimate`（防抖 600ms、代际号 `estGen` 作废旧统计、同范围结果缓存 `estCacheKey`）在空间页日期行下方显示"预计 N 个视频"；最多扫 `UP_EST_PAGES=6` 页（对齐单次上限 300）；正式任务开始时统计自动让位。README 已同步。
 
+### v0.9.1 跟进修复（2026-11-04，用户复审反馈）
+
+1. **P2 小写 bv 前缀**：新增 `normBvPrefix`（仅当整体为 `bv`+10 位时把前缀归一为大写，后 10 位保持原样），`parseBiliVideoRef` 三处入口、`normalizeBatchUrl` 裸 token、`urlStartKind` BV 分支（改 `/i`）统一生效。小写 `bv1xx…` 不再被静默丢弃/误报"不是普通视频页"。+6 条测试（batch 72）。
+2. **P3 网页双抓**：不改。`parseBatchUrls` 已按归一化输入 URL 去重，相同输入根本不会进 `saveBatchUrl`；剩下的双抓只发生在"不同输入重定向到同一 finalUrl"，必须抓完才能发现，按输入 URL 粗去重对它无效（纯额外开销）。保持现状。
+3. **P3 total 展示**：扫描进度从第 2 页起带"(该UP共 N 投稿)"；"找到 N 个视频"行同样附带。
+4. **P3 微观冗余**：删除 `runUpBatch`/`runBatchSave` 里 try 内的 `st.aborted` 赋值与早退分支内的重复置位，finally 为唯一权威。`renderJobResults` 全量重建按 reviewer 评估维持现状。
+- 版本 0.9.1（userscript 头 + SCRIPT_VERSION 兜底 + dev/preview.html ×2）；**174 条测试通过**。
+
 ---
 
 ## 6. 建议下一步（交给下一个 agent）
