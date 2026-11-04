@@ -1,0 +1,891 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Webbin — StashDock UI 定稿原型 (540×640)</title>
+  <script src="https://www.gstatic.com/antigravity/web/dev/tailwindcss.min.js"></script>
+  <style>
+    @supports (background: linear-gradient(in oklab, white, black)) {
+      .sd-shell {
+        --in-oklab: in oklab;
+      }
+    }
+
+    .sd-shell[data-theme="light"] {
+      --sd-canvas: #f5f5f3;
+      --sd-panel: #fbfbfa;
+      --sd-well: #efefec;
+      --sd-well-hover: #e7e7e3;
+      --sd-card: #f3f3f0;
+      --sd-card-hover: #ecece8;
+      --sd-surface: #ffffff;
+      --sd-text: #18181b;
+      --sd-sub: #68686f;
+      --sd-muted: #94949c;
+      --sd-border: rgba(24, 24, 27, 0.07);
+      --sd-border-strong: rgba(24, 24, 27, 0.13);
+      --sd-accent: #18181b;
+      --sd-accent-fg: #ffffff;
+      --sd-brand: #3b6ff5;
+      --sd-brand-soft: rgba(59, 111, 245, 0.12);
+      --sd-danger: #e5484d;
+      --sd-danger-soft: rgba(229, 72, 77, 0.1);
+      --sd-ok: #299764;
+      --sd-ok-soft: rgba(41, 151, 100, 0.12);
+      --sd-pill-shadow: 0 1px 3px rgba(0, 0, 0, 0.08), 0 1px 2px rgba(0, 0, 0, 0.04);
+      --sd-card-shadow: 0 2px 6px rgba(0, 0, 0, 0.03), 0 1px 2px rgba(0, 0, 0, 0.02);
+      --sd-card-shadow-hover: 0 8px 20px rgba(0, 0, 0, 0.06), 0 2px 6px rgba(0, 0, 0, 0.04);
+      --sd-panel-shadow: 0 20px 52px rgba(0, 0, 0, 0.14), 0 4px 14px rgba(0, 0, 0, 0.05);
+      --sd-dock-bg: rgba(255, 255, 255, 0.88);
+    }
+
+    .sd-shell[data-theme="dark"] {
+      --sd-canvas: #0f1012;
+      --sd-panel: #16171b;
+      --sd-well: #202228;
+      --sd-well-hover: #282b33;
+      --sd-card: #1d1f25;
+      --sd-card-hover: #23262e;
+      --sd-surface: #282b34;
+      --sd-text: #f3f4f6;
+      --sd-sub: #9ca3af;
+      --sd-muted: #6b7280;
+      --sd-border: rgba(255, 255, 255, 0.07);
+      --sd-border-strong: rgba(255, 255, 255, 0.14);
+      --sd-accent: #f3f4f6;
+      --sd-accent-fg: #111215;
+      --sd-brand: #5b8def;
+      --sd-brand-soft: rgba(91, 141, 239, 0.16);
+      --sd-danger: #f2555a;
+      --sd-danger-soft: rgba(242, 85, 90, 0.15);
+      --sd-ok: #3dd68c;
+      --sd-ok-soft: rgba(61, 214, 140, 0.15);
+      --sd-pill-shadow: 0 2px 6px rgba(0, 0, 0, 0.35), 0 1px 2px rgba(0, 0, 0, 0.25);
+      --sd-card-shadow: 0 2px 8px rgba(0, 0, 0, 0.22);
+      --sd-card-shadow-hover: 0 10px 24px rgba(0, 0, 0, 0.38), 0 4px 10px rgba(0, 0, 0, 0.24);
+      --sd-panel-shadow: 0 24px 64px rgba(0, 0, 0, 0.55);
+      --sd-dock-bg: rgba(32, 34, 40, 0.9);
+    }
+
+    .sd-shell {
+      --in-oklab: ;
+      background: var(--sd-canvas);
+      color: var(--sd-text);
+      transition: background-color 0.25s ease, color 0.25s ease;
+    }
+
+    .sd-panel {
+      width: min(94vw, 540px);
+      height: min(84vh, 640px);
+      background: var(--sd-panel);
+      border: 1px solid var(--sd-border-strong);
+      box-shadow: var(--sd-panel-shadow);
+      border-radius: 22px;
+      transition: transform 0.22s cubic-bezier(0.22, 1, 0.36, 1);
+    }
+
+    .sd-interactive {
+      translate: 0px 0px;
+      scale: 1;
+      rotate: 0deg;
+      transition:
+        translate 0.2s cubic-bezier(0.22, 1, 0.36, 1),
+        scale 0.16s cubic-bezier(0.22, 1, 0.36, 1),
+        rotate 0.35s cubic-bezier(0.22, 1, 0.36, 1),
+        background-color 0.18s ease,
+        border-color 0.18s ease,
+        box-shadow 0.2s ease,
+        color 0.18s ease,
+        opacity 0.18s ease;
+    }
+    .sd-interactive:active:not(:disabled) {
+      scale: 0.96;
+    }
+
+    .sd-track {
+      background: var(--sd-well);
+      border: 1px solid var(--sd-border);
+      border-radius: 9999px;
+      padding: 3.5px;
+      display: inline-flex;
+      align-items: center;
+      gap: 2px;
+    }
+
+    .sd-seg-btn {
+      border-radius: 9999px;
+      padding: 5px 12px;
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--sd-sub);
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      cursor: pointer;
+      user-select: none;
+      white-space: nowrap;
+      translate: 0px 0px;
+      scale: 1;
+      transition: color 0.18s ease, background-color 0.18s ease, box-shadow 0.2s ease, scale 0.14s ease;
+    }
+    .sd-seg-btn:hover:not([data-active="true"]) {
+      color: var(--sd-text);
+    }
+    .sd-seg-btn:active {
+      scale: 0.97;
+    }
+    .sd-seg-btn[data-active="true"] {
+      background: var(--sd-surface);
+      color: var(--sd-text);
+      font-weight: 600;
+      box-shadow: var(--sd-pill-shadow);
+    }
+
+    .sd-pill-btn {
+      background: var(--sd-surface);
+      color: var(--sd-text);
+      border: 1px solid var(--sd-border-strong);
+      border-radius: 9999px;
+      padding: 6px 13px;
+      font-size: 12px;
+      font-weight: 500;
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    .sd-pill-btn:hover:not(:disabled) {
+      background: var(--sd-well);
+      translate: 0px -1px;
+      box-shadow: var(--sd-pill-shadow);
+    }
+    .sd-pill-btn[data-primary="true"] {
+      background: var(--sd-accent);
+      color: var(--sd-accent-fg);
+      border-color: transparent;
+    }
+    .sd-pill-btn[data-primary="true"]:hover:not(:disabled) {
+      opacity: 0.92;
+      background: var(--sd-accent);
+    }
+
+    .sd-icon-btn {
+      width: 32px;
+      height: 32px;
+      border-radius: 9999px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--sd-sub);
+      background: transparent;
+      border: 1px solid transparent;
+      cursor: pointer;
+    }
+    .sd-icon-btn:hover {
+      background: var(--sd-well);
+      color: var(--sd-text);
+    }
+
+    .sd-search-wrap {
+      background: var(--sd-well);
+      border: 1px solid var(--sd-border);
+      border-radius: 9999px;
+      padding: 6px 13px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      transition: background-color 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease;
+    }
+    .sd-search-wrap:focus-within {
+      background: var(--sd-surface);
+      border-color: var(--sd-border-strong);
+      box-shadow: 0 0 0 3px var(--sd-brand-soft), var(--sd-pill-shadow);
+    }
+
+    /* Compact Concentric Bento Card (outer 18px, padding 8px, inner 11px) */
+    .sd-bento-card {
+      background: var(--sd-card);
+      border: 1px solid var(--sd-border);
+      border-radius: 18px;
+      padding: 8px;
+      box-shadow: var(--sd-card-shadow);
+      display: flex;
+      flex-direction: column;
+      cursor: pointer;
+      position: relative;
+      translate: 0px 0px;
+      scale: 1;
+      transition:
+        translate 0.2s cubic-bezier(0.22, 1, 0.36, 1),
+        scale 0.16s cubic-bezier(0.22, 1, 0.36, 1),
+        box-shadow 0.2s ease,
+        border-color 0.18s ease,
+        background-color 0.18s ease;
+    }
+    .sd-bento-card:hover {
+      translate: 0px -2px;
+      background: var(--sd-card-hover);
+      box-shadow: var(--sd-card-shadow-hover);
+      border-color: var(--sd-border-strong);
+    }
+    .sd-bento-card[data-selected="true"] {
+      border-color: var(--sd-accent);
+      box-shadow: 0 0 0 1.5px var(--sd-accent), var(--sd-card-shadow);
+    }
+
+    .sd-card-well {
+      background: linear-gradient(
+        165deg var(--in-oklab),
+        var(--sd-surface) 0%,
+        color-mix(in oklab, var(--sd-surface) 76%, var(--sd-well)) 100%
+      );
+      border: 1px solid var(--sd-border);
+      border-radius: 11px;
+      padding: 9px 10px;
+      position: relative;
+      min-height: 86px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      overflow: hidden;
+    }
+
+    .sd-check-circle {
+      width: 24px;
+      height: 24px;
+      border-radius: 9999px;
+      background: var(--sd-surface);
+      border: 1px solid var(--sd-border-strong);
+      box-shadow: var(--sd-pill-shadow);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--sd-muted);
+      cursor: pointer;
+      flex-shrink: 0;
+      translate: 0px 0px;
+      scale: 1;
+      transition: scale 0.15s cubic-bezier(0.22, 1, 0.36, 1), background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+    }
+    .sd-check-circle:hover {
+      scale: 1.08;
+      color: var(--sd-text);
+    }
+    .sd-check-circle:active {
+      scale: 0.92;
+    }
+    .sd-check-circle[data-checked="true"] {
+      background: var(--sd-accent);
+      color: var(--sd-accent-fg);
+      border-color: var(--sd-accent);
+    }
+
+    .sd-list-row {
+      background: var(--sd-card);
+      border: 1px solid var(--sd-border);
+      border-radius: 14px;
+      padding: 9px 11px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      cursor: pointer;
+      translate: 0px 0px;
+      scale: 1;
+      transition: translate 0.18s ease, background-color 0.16s ease, border-color 0.16s ease, box-shadow 0.18s ease;
+    }
+    .sd-list-row:hover {
+      background: var(--sd-surface);
+      border-color: var(--sd-border-strong);
+      box-shadow: var(--sd-pill-shadow);
+    }
+    .sd-list-row[data-selected="true"] {
+      border-color: var(--sd-accent);
+      background: var(--sd-surface);
+    }
+
+    .sd-input {
+      width: 100%;
+      background: var(--sd-well);
+      border: 1px solid var(--sd-border);
+      border-radius: 12px;
+      padding: 8px 12px;
+      font-size: 13px;
+      color: var(--sd-text);
+      outline: none;
+      transition: background-color 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease;
+    }
+    .sd-input:focus {
+      background: var(--sd-surface);
+      border-color: var(--sd-border-strong);
+      box-shadow: 0 0 0 3px var(--sd-brand-soft);
+    }
+
+    @keyframes sd-pop-in {
+      from { opacity: 0; translate: 0px 6px; scale: 0.98; }
+      to { opacity: 1; translate: 0px 0px; scale: 1; }
+    }
+    @keyframes sd-spin {
+      to { rotate: 360deg; }
+    }
+    .sd-anim-in {
+      animation: sd-pop-in 0.2s cubic-bezier(0.22, 1, 0.36, 1) both;
+    }
+    .sd-spinning {
+      animation: sd-spin 0.65s linear infinite;
+    }
+
+    .sd-scroll::-webkit-scrollbar { width: 6px; height: 6px; }
+    .sd-scroll::-webkit-scrollbar-thumb { background: var(--sd-border-strong); border-radius: 9999px; }
+    .sd-scroll::-webkit-scrollbar-track { background: transparent; }
+
+    .line-clamp-2 {
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
+  </style>
+</head>
+<body class="bg-[var(--background)] text-[var(--foreground)] antialiased m-0 p-0">
+  <div id="app" class="sd-shell min-h-screen p-3 sm:p-5 flex flex-col items-center" data-theme="light">
+    <!-- Top Demo Controller Bar -->
+    <div class="w-full max-w-[680px] mb-3 flex flex-wrap items-center justify-between gap-2 px-1">
+      <div class="flex items-center gap-2 text-xs text-[var(--sd-sub)]">
+        <span class="inline-block w-2 h-2 rounded-full bg-emerald-500"></span>
+        <span>定稿尺寸 <b>540×640px</b> · 支持切换居中 / 靠右悬浮 · 跟随系统深浅色</span>
+      </div>
+      <div class="flex items-center gap-2">
+        <button id="posToggleBtn" class="sd-pill-btn sd-interactive !py-1 !px-3 !text-xs">
+          <span id="posLabel">📍 位置: 屏幕居中</span>
+        </button>
+        <button id="themeToggleBtn" class="sd-pill-btn sd-interactive !py-1 !px-3 !text-xs">
+          <span id="themeIcon">☀️</span>
+          <span id="themeLabel">暖白浅色</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- Simulated Host Webpage Viewport -->
+    <div id="viewportStage" class="w-full max-w-[680px] flex justify-center transition-all duration-300">
+      <!-- Main Webbin Floating Panel (540x640 Compact StashDock Style) -->
+      <div class="sd-panel flex flex-col overflow-hidden relative">
+        <!-- 1. Top Segmented Navigation (4 Buttons in DIV for test compatibility) -->
+        <header class="px-3.5 pt-3 pb-2.5 flex items-center justify-between gap-2 border-b border-[var(--sd-border)] shrink-0">
+          <div class="flex items-center gap-2 min-w-0">
+            <div class="w-6 h-6 rounded-lg bg-[var(--sd-accent)] text-[var(--sd-accent-fg)] flex items-center justify-center font-bold text-xs shadow-sm shrink-0">
+              W
+            </div>
+            <span class="font-bold text-sm tracking-tight">Webbin</span>
+          </div>
+
+          <div class="sd-track" id="mainTabs" role="tablist">
+            <button class="sd-seg-btn !py-1 !px-3 !text-xs" data-tab="save" data-active="false">当前页</button>
+            <button class="sd-seg-btn !py-1 !px-3 !text-xs" data-tab="list" data-active="true">已保存</button>
+            <button class="sd-seg-btn !py-1 !px-3 !text-xs" data-tab="chat" data-active="false">对话</button>
+            <button class="sd-seg-btn !py-1 !px-3 !text-xs" data-tab="settings" data-active="false">设置</button>
+          </div>
+        </header>
+
+        <!-- 2. Tab Body Container -->
+        <main id="tabBody" class="flex-1 overflow-y-auto sd-scroll relative px-3.5 py-3"></main>
+
+        <!-- 3. Floating Batch Action Dock -->
+        <div id="batchDock" class="pointer-events-none absolute left-3 right-3 bottom-10 z-20 flex justify-center transition-all duration-200 opacity-0 translate-y-3">
+          <div class="pointer-events-auto flex flex-wrap items-center gap-1 px-2.5 py-1.5 rounded-full border border-[var(--sd-border-strong)] shadow-lg"
+               style="background: var(--sd-dock-bg); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);">
+            <span id="dockCount" class="text-xs font-semibold px-2 py-0.5 rounded-full bg-[var(--sd-accent)] text-[var(--sd-accent-fg)]">已选 2 项</span>
+            <button id="dockSelectAll" class="sd-seg-btn !py-1 !px-2 !text-xs">全选</button>
+            <button id="dockSummarize" class="sd-seg-btn !py-1 !px-2 !text-xs hover:!bg-[var(--sd-well)]">AI 总结</button>
+            <button id="dockChat" class="sd-seg-btn !py-1 !px-2 !text-xs !text-[var(--sd-brand)] font-semibold hover:!bg-[var(--sd-brand-soft)]">就这些聊</button>
+            <button id="dockExport" class="sd-seg-btn !py-1 !px-2 !text-xs hover:!bg-[var(--sd-well)]">下载 .md</button>
+            <button id="dockDelete" class="sd-seg-btn !py-1 !px-2 !text-xs !text-[var(--sd-danger)] hover:!bg-[var(--sd-danger-soft)]">删除</button>
+            <button id="dockClear" class="sd-icon-btn !w-6 !h-6 !text-xs" title="取消选择">✕</button>
+          </div>
+        </div>
+
+        <!-- 4. Slide-up Item Detail Drawer -->
+        <div id="detailOverlay" class="hidden absolute inset-0 z-30 bg-black/25 backdrop-blur-[2px] flex flex-col justify-end transition-opacity">
+          <div id="detailSheet" class="sd-anim-in bg-[var(--sd-panel)] border-t border-[var(--sd-border-strong)] rounded-t-[22px] p-4 max-h-[82%] flex flex-col shadow-2xl">
+            <div id="detailContent" class="overflow-y-auto sd-scroll flex-1"></div>
+          </div>
+        </div>
+
+        <!-- 5. Toast Notification -->
+        <div id="toastBox" class="pointer-events-none absolute top-14 left-1/2 -translate-x-1/2 z-40 transition-all duration-200 opacity-0 -translate-y-2">
+          <div id="toastInner" class="px-3.5 py-1.5 rounded-full text-xs font-medium shadow-lg bg-[var(--sd-accent)] text-[var(--sd-accent-fg)] flex items-center gap-1.5"></div>
+        </div>
+
+        <!-- 6. Version Footer -->
+        <footer class="px-4 py-1.5 border-t border-[var(--sd-border)] flex items-center justify-between text-xs text-[var(--sd-muted)] shrink-0">
+          <span>Webbin v0.9.2 · ✓ 已是最新</span>
+          <span id="footerPosHint">弹出位置：屏幕居中</span>
+        </footer>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const ICONS = {
+      search: '<circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>',
+      grid: '<rect width="7" height="7" x="3" y="3" rx="1.5"/><rect width="7" height="7" x="14" y="3" rx="1.5"/><rect width="7" height="7" x="14" y="14" rx="1.5"/><rect width="7" height="7" x="3" y="14" rx="1.5"/>',
+      list: '<line x1="8" x2="21" y1="6" y2="6"/><line x1="8" x2="21" y1="12" y2="12"/><line x1="8" x2="21" y1="18" y2="18"/><line x1="3" x2="3.01" y1="6" y2="6"/><line x1="3" x2="3.01" y1="12" y2="12"/><line x1="3" x2="3.01" y2="18" y1="18"/>',
+      tag: '<path d="M12.586 2.586A2 2 0 0 0 11.172 2H4a2 2 0 0 0-2 2v7.172a2 2 0 0 0 .586 1.414l8.704 8.704a2.426 2.426 0 0 0 3.42 0l6.58-6.58a2.426 2.426 0 0 0 0-3.42z"/><circle cx="7.5" cy="7.5" r=".5" fill="currentColor"/>',
+      refresh: '<path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/>',
+      check: '<path d="M20 6 9 17l-5-5"/>',
+      more: '<circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/>',
+      external: '<path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>',
+      tv: '<rect width="20" height="15" x="2" y="7" rx="2" ry="2"/><polyline points="17 2 12 7 7 2"/>',
+      file: '<path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M10 9H8"/><path d="M16 13H8"/><path d="M16 17H8"/>',
+      sparkles: '<path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"/>',
+      chevDown: '<path d="m6 9 6 6 6-6"/>',
+      send: '<path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/>',
+      plus: '<path d="M5 12h14"/><path d="M12 5v14"/>',
+      history: '<path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l4 2"/>',
+      eye: '<path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0"/><circle cx="12" cy="12" r="3"/>',
+    };
+    const svg = (name, size = 14, cls = "") =>
+      `<svg class="inline-block shrink-0 ${cls}" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.85" stroke-linecap="round" stroke-linejoin="round">${ICONS[name] || ""}</svg>`;
+
+    const prefersDark = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
+    const state = {
+      theme: prefersDark ? "dark" : "light",
+      panelPos: "center", // "center" | "right"
+      tab: "list",
+      viewMode: "grid",
+      filterGroup: "all",
+      searchQuery: "",
+      manageGroupsOpen: false,
+      savePageContext: "web",
+      upRangePreset: "30d",
+      selectedIds: new Set(["item-1", "item-2"]),
+      expandedTools: new Set(),
+      groups: [
+        { id: "default", name: "默认" },
+        { id: "g1", name: "AI 工程" },
+        { id: "g2", name: "前端架构" },
+      ],
+      items: [
+        {
+          id: "item-1",
+          title: "Harness Engineering for Self-Improvement | Lil'Log",
+          site: "lilianweng.github.io",
+          url: "https://lilianweng.github.io/posts/2026-09-harness/",
+          type: "web",
+          group_id: "g1",
+          created_at: "10分钟前",
+          has_summary: true,
+          status_tag: "✨ 已总结",
+          excerpt: "递归自我改进（RSI）的核心在于构建可验证的评测沙盒（Harness），通过分层回归基准过滤退化路径。",
+          content: "The concept of recursive self-improvement (RSI) dates back to I.J. Good (1965)...",
+        },
+        {
+          id: "item-2",
+          title: "Building an inference stack that improves itself · 字幕",
+          site: "bilibili.com",
+          url: "https://www.bilibili.com/video/BV1xx411c7mD",
+          type: "bilibili",
+          group_id: "g1",
+          created_at: "2小时前",
+          has_summary: true,
+          status_tag: "📺 字幕",
+          excerpt: "[00:15] 加速推理本质上是「诊断 → 内核实验 → 线上度量」的循环，CUDA profile 延迟下降 37%。",
+          content: "[00:00] 大家好，今天分享我们如何构建自我演进的推理栈。",
+        },
+        {
+          id: "item-3",
+          title: "Anti-Defensive Writing: Clear claims, Useful evidence",
+          site: "craft.do",
+          url: "https://craft.do/blog/anti-defensive-writing",
+          type: "web",
+          group_id: "default",
+          created_at: "昨天",
+          has_summary: true,
+          status_tag: "✨ 已总结",
+          excerpt: "把核心结论放在第一句，用可复现的数据边界代替防御性免责声明与模糊限定词。",
+          content: "Defensive writing hides conclusions behind hedges and caveats.",
+        },
+        {
+          id: "item-4",
+          title: "React 19 升级指南：Actions、use() 与表单状态原语",
+          site: "react.dev",
+          url: "https://react.dev/blog/2026/react-19",
+          type: "web",
+          group_id: "g2",
+          created_at: "3天前",
+          has_summary: false,
+          status_tag: "📄 正文",
+          excerpt: "异步过渡（Actions）成为一等原语，内置 pending 与乐观更新协调，ref 可作为普通 prop 传递。",
+          content: "React 19 introduces Actions for handling async mutations.",
+        },
+      ],
+      chatScopeGroup: "AI 工程 + 前端架构",
+      chatModel: "glm-4.7",
+      chatMessages: [
+        { role: "user", content: "对比一下 Lil'Log 文章和 B 站推理栈视频里提到的「自我改进」有什么共同点？" },
+        {
+          role: "tool",
+          id: "t1",
+          name: "search_kb",
+          argText: "自我改进 推理栈",
+          summary: "命中 2 条资料",
+          detail: "1. Harness Engineering for Self-Improvement | Lil'Log\n2. Building an inference stack that improves itself · 字幕",
+        },
+        {
+          role: "assistant",
+          content: "两份资料对「自我改进」的工程抽象一致：\n1. **评测沙盒重于单次生成**：能力复利取决于外围验证器闭环。\n2. **客观指标防退化**：用回归基准拦截负向改动。",
+          refs: [
+            { title: "Harness Engineering for Self-Improvement", site: "lilianweng.github.io" },
+            { title: "Building an inference stack · 字幕", site: "bilibili.com" },
+          ],
+        },
+      ],
+    };
+
+    let toastTimer = null;
+    function showToast(msg) {
+      const box = document.getElementById("toastBox");
+      const inner = document.getElementById("toastInner");
+      inner.innerHTML = `${svg("check", 13)} <span>${msg}</span>`;
+      box.classList.remove("opacity-0", "-translate-y-2");
+      box.classList.add("opacity-100", "translate-y-0");
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => {
+        box.classList.add("opacity-0", "-translate-y-2");
+        box.classList.remove("opacity-100", "translate-y-0");
+      }, 2200);
+    }
+
+    function syncPositionUI() {
+      const stage = document.getElementById("viewportStage");
+      stage.className = `w-full max-w-[680px] flex transition-all duration-300 ${state.panelPos === "right" ? "justify-end" : "justify-center"}`;
+      document.getElementById("posLabel").textContent = state.panelPos === "right" ? "📍 位置: 靠右侧悬浮" : "📍 位置: 屏幕居中";
+      document.getElementById("footerPosHint").textContent = state.panelPos === "right" ? "弹出位置：靠右侧悬浮" : "弹出位置：屏幕居中";
+    }
+
+    function syncThemeUI() {
+      document.getElementById("app").setAttribute("data-theme", state.theme);
+      document.getElementById("themeIcon").textContent = state.theme === "light" ? "☀️" : "🌙";
+      document.getElementById("themeLabel").textContent = state.theme === "light" ? "暖白浅色" : "暗夜深色";
+    }
+
+    function getFilteredItems() {
+      const q = state.searchQuery.trim().toLowerCase();
+      return state.items.filter((it) => {
+        if (state.filterGroup !== "all" && it.group_id !== state.filterGroup) return false;
+        if (q && !`${it.title} ${it.site} ${it.excerpt}`.toLowerCase().includes(q)) return false;
+        return true;
+      });
+    }
+
+    function render() {
+      syncThemeUI();
+      syncPositionUI();
+      document.querySelectorAll("#mainTabs .sd-seg-btn").forEach((btn) => {
+        btn.setAttribute("data-active", btn.dataset.tab === state.tab ? "true" : "false");
+      });
+
+      const dock = document.getElementById("batchDock");
+      const showDock = state.tab === "list" && state.selectedIds.size > 0;
+      if (showDock) {
+        dock.classList.remove("opacity-0", "translate-y-3");
+        dock.classList.add("opacity-100", "translate-y-0");
+        document.getElementById("dockCount").textContent = `已选 ${state.selectedIds.size} 项`;
+      } else {
+        dock.classList.add("opacity-0", "translate-y-3");
+        dock.classList.remove("opacity-100", "translate-y-0");
+      }
+
+      const body = document.getElementById("tabBody");
+      if (state.tab === "list") renderListTab(body);
+      else if (state.tab === "save") renderSaveTab(body);
+      else if (state.tab === "chat") renderChatTab(body);
+      else if (state.tab === "settings") renderSettingsTab(body);
+    }
+
+    function renderListTab(container) {
+      const visible = getFilteredItems();
+      const groupPills = [{ id: "all", name: "All 全部" }, ...state.groups];
+
+      container.innerHTML = `
+        <div class="sd-anim-in space-y-2.5 pb-12">
+          <!-- Row 1: Pill Search + Grid/List Segmented Switcher -->
+          <div class="flex items-center gap-2">
+            <div class="sd-search-wrap flex-1">
+              <span class="text-[var(--sd-muted)]">${svg("search", 15)}</span>
+              <input id="listSearchInput" type="text" value="${state.searchQuery}"
+                     placeholder="搜索标题或网站"
+                     class="bg-transparent border-none outline-none w-full text-xs text-[var(--sd-text)] placeholder:text-[var(--sd-muted)]" />
+            </div>
+
+            <div class="sd-track shrink-0">
+              <button class="sd-seg-btn !py-1 !px-2.5 !text-xs" data-view="grid" data-active="${state.viewMode === "grid"}">
+                <span>Grid</span> ${svg("grid", 13)}
+              </button>
+              <button class="sd-seg-btn !py-1 !px-2.5 !text-xs" data-view="list" data-active="${state.viewMode === "list"}">
+                <span>List</span> ${svg("list", 13)}
+              </button>
+            </div>
+          </div>
+
+          <!-- Row 2: Group Pills + Manage Groups + Refresh -->
+          <div class="flex items-center justify-between gap-1.5 flex-wrap">
+            <div class="sd-track overflow-x-auto max-w-full">
+              ${groupPills.map((g) => `
+                <button class="sd-seg-btn !py-1 !px-2.5 !text-xs filter-pill"
+                        data-group="${g.id}" data-active="${state.filterGroup === g.id}">
+                  ${g.name}
+                </button>
+              `).join("")}
+            </div>
+
+            <div class="flex items-center gap-1 ml-auto">
+              <button id="toggleGroupMgrBtn" class="sd-pill-btn sd-interactive !py-1 !px-2.5 !text-xs">
+                ${svg("tag", 12)} <span>管理分组</span>
+              </button>
+              <button id="refreshListBtn" class="sd-icon-btn sd-interactive !w-7 !h-7" title="刷新">
+                ${svg("refresh", 14)}
+              </button>
+            </div>
+          </div>
+
+          <!-- Cards Grid (Compact 2-Column in 540px) -->
+          ${state.viewMode === "grid" ? `
+            <div class="grid grid-cols-2 gap-2.5">
+              ${visible.map((it) => renderBentoCard(it)).join("")}
+            </div>
+          ` : `
+            <div class="space-y-2">
+              ${visible.map((it) => renderListRow(it)).join("")}
+            </div>
+          `}
+        </div>
+      `;
+
+      document.getElementById("listSearchInput")?.addEventListener("input", (e) => {
+        state.searchQuery = e.target.value;
+        const pos = e.target.selectionStart;
+        render();
+        const next = document.getElementById("listSearchInput");
+        if (next) { next.focus(); next.setSelectionRange(pos, pos); }
+      });
+      container.querySelectorAll("[data-view]").forEach((b) => {
+        b.addEventListener("click", () => { state.viewMode = b.dataset.view; render(); });
+      });
+      container.querySelectorAll(".filter-pill").forEach((b) => {
+        b.addEventListener("click", () => { state.filterGroup = b.dataset.group; render(); });
+      });
+      document.getElementById("refreshListBtn")?.addEventListener("click", (e) => {
+        const icon = e.currentTarget.querySelector("svg");
+        icon?.classList.add("sd-spinning");
+        setTimeout(() => { icon?.classList.remove("sd-spinning"); showToast("已更新 ✓"); }, 500);
+      });
+      container.querySelectorAll("[data-check-id]").forEach((chk) => {
+        chk.addEventListener("click", (e) => {
+          e.stopPropagation();
+          const id = chk.dataset.checkId;
+          if (state.selectedIds.has(id)) state.selectedIds.delete(id);
+          else state.selectedIds.add(id);
+          render();
+        });
+      });
+      container.querySelectorAll("[data-card-id]").forEach((card) => {
+        card.addEventListener("click", () => openItemDetail(card.dataset.cardId));
+      });
+    }
+
+    function renderBentoCard(it) {
+      const checked = state.selectedIds.has(it.id);
+      const groupObj = state.groups.find((g) => g.id === it.group_id);
+      const isBili = it.type === "bilibili";
+      return `
+        <article class="sd-bento-card" data-card-id="${it.id}" data-selected="${checked}">
+          <div class="sd-card-well">
+            <div class="flex items-center justify-between gap-1.5 mb-1.5">
+              <button type="button" class="sd-check-circle" data-check-id="${it.id}" data-checked="${checked}">
+                ${svg("check", 12)}
+              </button>
+              <span class="px-2 py-0.5 rounded-full text-xs border border-[var(--sd-border)] bg-[var(--sd-panel)] text-[var(--sd-sub)]">
+                ${it.status_tag}
+              </span>
+            </div>
+            <p class="text-xs leading-snug text-[var(--sd-sub)] line-clamp-2 select-none">
+              ${it.excerpt}
+            </p>
+          </div>
+
+          <div class="pt-2 px-1 pb-0.5 flex flex-col justify-between flex-1">
+            <div class="flex items-start justify-between gap-1.5">
+              <h3 class="font-semibold text-xs leading-snug text-[var(--sd-text)] line-clamp-2">${it.title}</h3>
+              <span class="text-[var(--sd-muted)] shrink-0">${svg("more", 14)}</span>
+            </div>
+            <div class="mt-2 flex items-center justify-between text-xs text-[var(--sd-sub)]">
+              <div class="flex items-center gap-1 min-w-0 truncate">
+                <span class="w-4 h-4 rounded flex items-center justify-center shrink-0 ${isBili ? "text-sky-500 bg-sky-500/10" : "text-indigo-500 bg-indigo-500/10"}">
+                  ${svg(isBili ? "tv" : "file", 11)}
+                </span>
+                <span class="truncate">${it.site}</span>
+              </div>
+              <span class="text-[var(--sd-muted)] shrink-0 ml-1">${svg("external", 12)}</span>
+            </div>
+          </div>
+        </article>
+      `;
+    }
+
+    function renderListRow(it) {
+      const checked = state.selectedIds.has(it.id);
+      return `
+        <div class="sd-list-row" data-card-id="${it.id}" data-selected="${checked}">
+          <button type="button" class="sd-check-circle" data-check-id="${it.id}" data-checked="${checked}">
+            ${svg("check", 12)}
+          </button>
+          <div class="flex-1 min-w-0">
+            <div class="font-semibold text-xs text-[var(--sd-text)] truncate">${it.title}</div>
+            <div class="text-xs text-[var(--sd-sub)] truncate mt-0.5">${it.site} · ${it.status_tag}</div>
+          </div>
+          <span class="text-[var(--sd-muted)]">${svg("more", 14)}</span>
+        </div>
+      `;
+    }
+
+    function openItemDetail(id) {
+      const it = state.items.find((x) => x.id === id);
+      if (!it) return;
+      const overlay = document.getElementById("detailOverlay");
+      const content = document.getElementById("detailContent");
+      content.innerHTML = `
+        <div class="space-y-3">
+          <div class="flex items-start justify-between gap-2">
+            <div>
+              <div class="text-xs text-[var(--sd-sub)]">${it.site} · ${it.created_at}</div>
+              <h3 class="text-sm font-bold text-[var(--sd-text)] mt-0.5">${it.title}</h3>
+            </div>
+            <button id="closeDetailBtn" class="sd-icon-btn !w-7 !h-7">✕</button>
+          </div>
+          <div class="flex flex-wrap gap-1.5">
+            <button id="detailSumBtn" class="sd-pill-btn sd-interactive" data-primary="true">${svg("sparkles", 12)} <span>生成 AI 总结</span></button>
+            <button class="sd-pill-btn sd-interactive">下载 .md</button>
+          </div>
+          <div class="p-3 rounded-xl bg-[var(--sd-well)] border border-[var(--sd-border)] text-xs leading-relaxed">
+            ${it.excerpt}
+          </div>
+        </div>
+      `;
+      overlay.classList.remove("hidden");
+      document.getElementById("closeDetailBtn")?.addEventListener("click", () => overlay.classList.add("hidden"));
+      document.getElementById("detailSumBtn")?.addEventListener("click", () => {
+        overlay.classList.add("hidden");
+        showToast("总结完成 ✓");
+      });
+    }
+
+    function renderSaveTab(container) {
+      container.innerHTML = `
+        <div class="sd-anim-in space-y-3">
+          <div class="sd-bento-card !cursor-default !p-3.5 space-y-3 hover:!translate-y-0">
+            <div class="text-xs font-semibold text-[var(--sd-sub)]">当前网页正文提取</div>
+            <input type="text" class="sd-input" value="Harness Engineering for Self-Improvement | Lil'Log" />
+            <div class="flex items-center justify-between gap-2 flex-wrap">
+              <span class="text-xs text-[var(--sd-sub)]">保存到分组：AI 工程</span>
+              <div class="flex gap-1.5">
+                <button class="sd-pill-btn sd-interactive">提取正文预览</button>
+                <button id="demoSaveBtn" class="sd-pill-btn sd-interactive" data-primary="true">保存到收集箱</button>
+              </div>
+            </div>
+            <div class="sd-card-well !min-h-[76px] text-xs text-[var(--sd-sub)]">
+              点「保存到收集箱」会自动提取正文并保存，无需先预览。
+            </div>
+          </div>
+        </div>
+      `;
+      document.getElementById("demoSaveBtn")?.addEventListener("click", () => showToast("已保存 ✓"));
+    }
+
+    function renderChatTab(container) {
+      container.innerHTML = `
+        <div class="sd-anim-in h-full flex flex-col justify-between gap-2.5">
+          <div class="flex items-center gap-1.5">
+            <button class="sd-pill-btn sd-interactive !py-1 !px-2.5">新会话</button>
+            <button class="sd-pill-btn sd-interactive !py-1 !px-2.5">历史(2)</button>
+            <button class="sd-pill-btn sd-interactive !py-1 !px-2.5">⟳ 索引</button>
+          </div>
+          <div class="flex-1 overflow-y-auto sd-scroll space-y-2">
+            ${state.chatMessages.map((m) => m.role === "user"
+              ? `<div class="flex justify-end"><div class="max-w-[85%] px-3.5 py-2 rounded-2xl bg-[var(--sd-accent)] text-[var(--sd-accent-fg)] text-xs">${m.content}</div></div>`
+              : `<div class="sd-bento-card !cursor-default !p-3 text-xs leading-relaxed whitespace-pre-wrap">${m.content || m.summary}</div>`
+            ).join("")}
+          </div>
+          <div class="p-2 rounded-[18px] bg-[var(--sd-well)] border border-[var(--sd-border-strong)] space-y-1.5">
+            <textarea rows="2" placeholder="就所选范围提问…" class="w-full bg-transparent border-none outline-none resize-none px-1.5 text-xs text-[var(--sd-text)]"></textarea>
+            <div class="flex items-center justify-between">
+              <div class="flex gap-1">
+                <button class="sd-pill-btn !py-1 !px-2.5">分组: AI 工程</button>
+                <button class="sd-pill-btn !py-1 !px-2.5">资料: 2 条</button>
+              </div>
+              <button class="w-7 h-7 rounded-full bg-[var(--sd-accent)] text-[var(--sd-accent-fg)] flex items-center justify-center">➤</button>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    function renderSettingsTab(container) {
+      container.innerHTML = `
+        <div class="sd-anim-in space-y-3">
+          <!-- New Setting: Panel Position -->
+          <div class="sd-bento-card !cursor-default !p-3.5 space-y-2 hover:!translate-y-0">
+            <div class="flex items-center justify-between gap-2">
+              <div>
+                <div class="text-xs font-semibold text-[var(--sd-text)]">界面与弹出位置</div>
+                <div class="text-xs text-[var(--sd-sub)]">深浅色自动跟随系统；可选择面板在网页居中或靠右侧悬浮</div>
+              </div>
+              <div class="sd-track">
+                <button class="sd-seg-btn !py-1 !px-3 !text-xs pos-opt" data-pos="center" data-active="${state.panelPos === "center"}">屏幕居中</button>
+                <button class="sd-seg-btn !py-1 !px-3 !text-xs pos-opt" data-pos="right" data-active="${state.panelPos === "right"}">靠右悬浮</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Worker Connection -->
+          <div class="sd-bento-card !cursor-default !p-3.5 space-y-2.5 hover:!translate-y-0">
+            <div class="text-xs font-semibold text-[var(--sd-text)]">Cloudflare Worker 连接</div>
+            <input type="text" class="sd-input" placeholder="https://webbin.xxx.workers.dev" value="https://webbin.arevlx.workers.dev" />
+            <div class="flex gap-1.5">
+              <button class="sd-pill-btn sd-interactive" data-primary="true">保存连接信息</button>
+              <button class="sd-pill-btn sd-interactive">测试连接</button>
+            </div>
+          </div>
+        </div>
+      `;
+      container.querySelectorAll(".pos-opt").forEach((b) => {
+        b.addEventListener("click", () => {
+          state.panelPos = b.dataset.pos;
+          render();
+          showToast(state.panelPos === "right" ? "已切换为靠右侧悬浮" : "已切换为屏幕居中");
+        });
+      });
+    }
+
+    document.querySelectorAll("#mainTabs .sd-seg-btn").forEach((btn) => {
+      btn.addEventListener("click", () => { state.tab = btn.dataset.tab; render(); });
+    });
+    document.getElementById("posToggleBtn")?.addEventListener("click", () => {
+      state.panelPos = state.panelPos === "center" ? "right" : "center";
+      render();
+    });
+    document.getElementById("themeToggleBtn")?.addEventListener("click", () => {
+      state.theme = state.theme === "light" ? "dark" : "light";
+      render();
+    });
+    document.getElementById("dockClear")?.addEventListener("click", () => { state.selectedIds.clear(); render(); });
+    document.getElementById("detailOverlay")?.addEventListener("click", (e) => {
+      if (e.target.id === "detailOverlay") e.currentTarget.classList.add("hidden");
+    });
+
+    render();
+  </script>
+</body>
+</html>

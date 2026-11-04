@@ -29,6 +29,16 @@ class El {
   set textContent(v) { this._text = String(v); this.children = []; }
   get lastChild() { return this.children[this.children.length - 1] || null; }
   get firstChild() { return this.children[0] || null; }
+  get nextSibling() {
+    const siblings = this.parentElement?.children || [];
+    return siblings[siblings.indexOf(this) + 1] || null;
+  }
+  after(node) {
+    if (!this.parentElement) return;
+    node.parentElement = this.parentElement;
+    const siblings = this.parentElement.children;
+    siblings.splice(siblings.indexOf(this) + 1, 0, node);
+  }
   get isConnected() { let n = this; while (n.parentElement) n = n.parentElement; return n.tagName === "HTML"; }
   get offsetLeft() {
     const L = parseFloat(this._props.left);

@@ -6,7 +6,8 @@
 <title>Webbin UI Preview</title>
 <style>
   html, body { margin: 0; height: 100%; }
-  body { background: linear-gradient(135deg, #7c8aa5 0%, #47566b 100%); }
+  body { background: #f5f5f3; }
+  @media (prefers-color-scheme: dark) { body { background: #101114; } }
 </style>
 </head>
 <body>
@@ -17,6 +18,7 @@
   // ?noanim 强制减少动态效果:截图确定性(面板入场动画在后台标签会被节流停在 opacity 0)
   const theme = new URLSearchParams(location.search).get("theme");
   const noanim = new URLSearchParams(location.search).has("noanim");
+  if (theme) document.body.style.background = theme === "dark" ? "#101114" : "#f5f5f3";
   if (theme || noanim) {
     const orig = window.matchMedia.bind(window);
     window.matchMedia = (q) => {
@@ -30,10 +32,13 @@
     };
   }
   const store = new Map();
+  const params = new URLSearchParams(location.search);
+  store.set("panel_pos", params.get("position") === "right" ? "right" : "center");
+  store.set("saved_list_view_v1", params.get("view") === "list" ? "list" : "grid");
   const ITEM = (id, title, summary) => ({
     id, title, url: "https://example.com/post/" + id, site: "example.com",
-    type: "web", group_id: id === "a1" ? "g1" : "g2", created_at: 1,
-    has_content: true, summary,
+    type: id === "a3" ? "bilibili" : "web", group_id: id === "a1" ? "g1" : "g2", created_at: Date.now() - 86400000,
+    has_content: true, has_summary: !!summary, summary, status: id === "a2" ? "archived" : "pending",
   });
   const ITEMS = [
     ITEM("a1", "React 19 升级指南:Actions 与新 Hooks", "React 19 引入 Actions、use() 与 ref 作为 prop 等变化…"),
@@ -77,7 +82,7 @@
   window.GM_setValue = (k, v) => store.set(k, v);
   window.GM_deleteValue = (k) => store.delete(k);
   window.GM_addStyle = (css) => { const s = document.createElement("style"); s.textContent = css; document.head.append(s); };
-  window.GM_info = { script: { version: "0.9.1" } };
+  window.GM_info = { script: { version: "0.9.3" } };
   window.GM_registerMenuCommand = () => {};
 
   let chatCalls = 0;
@@ -85,8 +90,9 @@
     const respond = (status, body) => Promise.resolve().then(() => d.onload && d.onload({ status, responseText: typeof body === "string" ? body : JSON.stringify(body) }));
     let p = "";
     try { p = new URL(d.url).pathname; } catch { /* 忽略 */ }
-    if (p.endsWith("/userscript.user.js")) { respond(200, "// ==UserScript==\n// @version 0.9.1\n// ==/UserScript=="); return { abort() {} }; }
+    if (p.endsWith("/userscript.user.js")) { respond(200, "// ==UserScript==\n// @version 0.9.3\n// ==/UserScript=="); return { abort() {} }; }
     if (p === "/api/kb/metadata") { respond(200, { total: ITEMS.length, items: ITEMS, next_cursor: null }); return { abort() {} }; }
+    if (p === "/api/items") { respond(200, { items: ITEMS }); return { abort() {} }; }
     if (p === "/api/groups") { respond(200, { groups: [{ id: "g1", name: "前端" }, { id: "g2", name: "AI 工具" }] }); return { abort() {} }; }
     if (p === "/api/models") { respond(200, { models: ["glm-4.7", "deepseek-chat"], current: "glm-4.7" }); return { abort() {} }; }
     if (p.startsWith("/api/item/")) { respond(200, FULL[p.split("/").pop()] || { error: "not found" }); return { abort() {} }; }
@@ -119,7 +125,7 @@ window.addEventListener("load", () => {
     if (!ball) return;
     ball.dispatchEvent(new PointerEvent("pointerdown", { clientX: 0, clientY: 0, pointerId: 1 }));
     ball.dispatchEvent(new PointerEvent("pointerup", { clientX: 0, clientY: 0, pointerId: 1 }));
-    const tab = new URLSearchParams(location.search).get("tab") || "chat";
+    const tab = new URLSearchParams(location.search).get("tab") || "list";
     setTimeout(() => {
       const clickBtn = (pred) => {
         const b = [...document.querySelectorAll("button")].find(pred);
@@ -128,6 +134,7 @@ window.addEventListener("load", () => {
       if (tab === "save") clickBtn((b) => b.textContent.trim() === "当前页");
       else if (tab === "list") clickBtn((b) => b.textContent.trim() === "已保存");
       else if (tab === "settings") clickBtn((b) => b.textContent.trim() === "设置");
+      else if (tab === "chat") clickBtn((b) => b.textContent.trim() === "对话");
       else if (tab === "history") {
         clickBtn((b) => b.textContent.trim() === "对话");
         setTimeout(() => clickBtn((b) => b.textContent.trim().startsWith("历史")), 250);

@@ -3,7 +3,7 @@
 // @name:en      Webbin Saver
 // @description  保存网页正文/B站视频到自己的 Cloudflare Worker,双端 Edge 可用;B站视频可抓取字幕/评论、UP主主页按时间范围批量抓字幕、批量保存多个网址,AI 总结、分组管理与知识库对话(工具调用 Agent)、下载归档
 // @namespace    https://github.com/local/webbin
-// @version      0.9.2
+// @version      0.9.3
 // @updateURL    /userscript.user.js
 // @author       you
 // @match        *://*/*
@@ -39,10 +39,14 @@
         token: GM_getValue("token", ""),
         btnX: GM_getValue("btnX", null),
         btnY: GM_getValue("btnY", null),
+        panelPos: GM_getValue("panel_pos", "center") === "right" ? "right" : "center",
       };
     },
     set(key, value) {
-      GM_setValue(key, key === "worker" ? normWorker(value) : value);
+      const next = key === "worker" ? normWorker(value) : value;
+      const workerChanged = key === "worker" && next !== this.get().worker;
+      GM_setValue(key === "panelPos" ? "panel_pos" : key, next);
+      if (workerChanged) resetSavedConnection(next);
     },
   };
 
@@ -59,6 +63,7 @@
 
   function gmFetch(method, path, body, opts = {}) {
     const { worker, token } = $storage.get();
+    const connectionVersion = savedConnectionVersion;
     if (!worker || !token) return Promise.reject(new Error("请先在设置中填写 Worker 地址和 Token"));
     let abortFn = null;
     const p = new Promise((resolve, reject) => {
@@ -69,6 +74,7 @@
         data: body ? JSON.stringify(body) : undefined,
         timeout: opts.timeout || 120000,
         onload: (r) => {
+          if (connectionVersion !== savedConnectionVersion) return reject(new Error("Worker 已切换,忽略旧连接的响应"));
           let data;
           try {
             data = JSON.parse(r.responseText);
@@ -119,16 +125,90 @@
   const DARK = matchMedia("(prefers-color-scheme: dark)").matches;
   // 分层表面:bg(面板底) < bg2(卡片/输入区) < bg3(浮起元素)。改主题只改这里,所有取色经 C
   const C = {
-    bg: DARK ? "#17181d" : "#fbfbfc",
-    bg2: DARK ? "#1f2127" : "#f2f3f6",
-    bg3: DARK ? "#282a32" : "#e9ebf0",
-    text: DARK ? "#e9eaf0" : "#1c2230",
-    sub: DARK ? "#9aa1ad" : "#6b7280",
-    accent: "#4d8dfd",
-    border: DARK ? "#2d3038" : "#e4e7ec",
-    danger: "#f05252",
-    ok: "#34d17c",
+    bg: DARK ? "#16171b" : "#fbfbfa",
+    bg2: DARK ? "#202228" : "#efefec",
+    bg3: DARK ? "#282b33" : "#e6e6e2",
+    surface: DARK ? "#262932" : "#ffffff",
+    card: DARK ? "#1c1e24" : "#f3f3f0",
+    cardHover: DARK ? "#22252d" : "#ecece8",
+    text: DARK ? "#f3f4f6" : "#18181b",
+    sub: DARK ? "#9ca3af" : "#68686f",
+    muted: DARK ? "#6b7280" : "#94949c",
+    accent: DARK ? "#5b8def" : "#3b6ff5",      // 品牌高亮色(焦点环/链接/主要状态)
+    primaryBg: DARK ? "#f3f4f6" : "#18181b",   // StashDock 深炭黑/亮白主胶囊底色
+    primaryFg: DARK ? "#111215" : "#ffffff",   // 主胶囊文字色
+    border: DARK ? "rgba(255,255,255,0.08)" : "rgba(24,24,27,0.08)",
+    borderStrong: DARK ? "rgba(255,255,255,0.15)" : "rgba(24,24,27,0.14)",
+    danger: DARK ? "#f2555a" : "#e5484d",
+    ok: DARK ? "#3dd68c" : "#299764",
+    pillShadow: DARK
+      ? "0 2px 6px rgba(0,0,0,0.38), 0 1px 2px rgba(0,0,0,0.24)"
+      : "0 1px 3px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.04)",
+    cardShadow: DARK
+      ? "0 2px 8px rgba(0,0,0,0.24)"
+      : "0 2px 6px rgba(0,0,0,0.03), 0 1px 2px rgba(0,0,0,0.02)",
+    cardShadowHover: DARK
+      ? "0 10px 24px rgba(0,0,0,0.4), 0 4px 10px rgba(0,0,0,0.24)"
+      : "0 8px 20px rgba(0,0,0,0.06), 0 2px 6px rgba(0,0,0,0.04)",
+    panelShadow: DARK
+      ? "0 24px 64px rgba(0,0,0,0.58), 0 4px 16px rgba(0,0,0,0.35)"
+      : "0 20px 52px rgba(0,0,0,0.14), 0 4px 14px rgba(0,0,0,0.05)",
   };
+
+  const SVG_PATHS = {
+    search: [["circle", { cx: "11", cy: "11", r: "8" }], ["path", { d: "m21 21-4.3-4.3" }]],
+    grid: [
+      ["rect", { width: "7", height: "7", x: "3", y: "3", rx: "1.5" }],
+      ["rect", { width: "7", height: "7", x: "14", y: "3", rx: "1.5" }],
+      ["rect", { width: "7", height: "7", x: "14", y: "14", rx: "1.5" }],
+      ["rect", { width: "7", height: "7", x: "3", y: "14", rx: "1.5" }],
+    ],
+    list: [
+      ["line", { x1: "8", x2: "21", y1: "6", y2: "6" }],
+      ["line", { x1: "8", x2: "21", y1: "12", y2: "12" }],
+      ["line", { x1: "8", x2: "21", y1: "18", y2: "18" }],
+      ["circle", { cx: "3.5", cy: "6", r: "1" }],
+      ["circle", { cx: "3.5", cy: "12", r: "1" }],
+      ["circle", { cx: "3.5", cy: "18", r: "1" }],
+    ],
+    external: [
+      ["path", { d: "M15 3h6v6" }],
+      ["path", { d: "M10 14 21 3" }],
+      ["path", { d: "M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" }],
+    ],
+    eye: [
+      ["path", { d: "M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0" }],
+      ["circle", { cx: "12", cy: "12", r: "3" }],
+    ],
+    eyeOff: [
+      ["path", { d: "M10.733 5.076a10.744 10.744 0 0 1 11.205 6.575 1 1 0 0 1 0 .696 10.747 10.747 0 0 1-1.444 2.49" }],
+      ["path", { d: "M14.084 14.158a3 3 0 0 1-4.242-4.242" }],
+      ["path", { d: "M17.479 17.499a10.75 10.75 0 0 1-15.417-5.151 1 1 0 0 1 0-.696 10.75 10.75 0 0 1 4.446-5.143" }],
+      ["path", { d: "m2 2 20 20" }],
+    ],
+  };
+
+  function svgIcon(name, size = 14) {
+    const ns = "http://www.w3.org/2000/svg";
+    const mk = (t) => (typeof document.createElementNS === "function" ? document.createElementNS(ns, t) : document.createElement(t));
+    const s = mk("svg");
+    s.setAttribute("width", String(size));
+    s.setAttribute("height", String(size));
+    s.setAttribute("viewBox", "0 0 24 24");
+    s.setAttribute("aria-hidden", "true");
+    s.setAttribute("fill", "none");
+    s.setAttribute("stroke", "currentColor");
+    s.setAttribute("stroke-width", "1.85");
+    s.setAttribute("stroke-linecap", "round");
+    s.setAttribute("stroke-linejoin", "round");
+    s.style.setProperty("flex-shrink", "0");
+    for (const [tag, attrs] of SVG_PATHS[name] || []) {
+      const n = mk(tag);
+      for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, v);
+      s.append(n);
+    }
+    return s;
+  }
 
   // #rrggbb → rgba() 半透明版:毛玻璃底色始终跟随调色板,不硬编码拷贝
   const rgbaOf = (hex, a) => {
@@ -144,10 +224,10 @@
   const REDUCE_TRANSPARENCY = matchMedia("(prefers-reduced-transparency: reduce)").matches;
   if (typeof GM_addStyle === "function" && !REDUCE_MOTION) {
     GM_addStyle(`
-@keyframes wi-pop { from { opacity: 0; transform: translateY(8px) scale(.97) } to { opacity: 1; transform: none } }
+@keyframes wi-pop { from { opacity: 0; translate: 0px 8px; scale: .97 } to { opacity: 1; translate: 0px 0px; scale: 1 } }
 @keyframes wi-fade { from { opacity: 0 } to { opacity: 1 } }
-@keyframes wi-slide { from { opacity: 0; transform: translateY(-6px) } to { opacity: 1; transform: none } }
-@keyframes wi-slide-up { from { opacity: 0; transform: translateY(6px) scale(.98) } to { opacity: 1; transform: none } }
+@keyframes wi-slide { from { opacity: 0; translate: 0px -6px } to { opacity: 1; translate: 0px 0px } }
+@keyframes wi-slide-up { from { opacity: 0; translate: 0px 6px; scale: .98 } to { opacity: 1; translate: 0px 0px; scale: 1 } }
 @keyframes wi-blink { 0%,100% { opacity: 1 } 50% { opacity: 0 } }
 @keyframes wi-spin { to { transform: rotate(360deg) } }
 @keyframes wi-bounce { 0%,80%,100% { transform: translateY(0); opacity: .4 } 40% { transform: translateY(-3px); opacity: 1 } }
@@ -168,6 +248,32 @@
 }
 `);
   }
+
+  if (typeof GM_addStyle === "function") GM_addStyle(`
+[data-wi-ui] { --wi-oklab: ; color-scheme: ${DARK ? "dark" : "light"}; }
+[data-wi-ui] *, [data-wi-ui] *::after { box-sizing: border-box; }
+[data-wi-ui] button, [data-wi-ui] input, [data-wi-ui] select, [data-wi-ui] textarea { font-family: inherit; }
+[data-wi-ui] button, [data-wi-ui] select { border-radius: 9999px !important; }
+[data-wi-ui] select { padding: 6px 12px !important; background: ${C.surface} !important; border: 1px solid ${C.borderStrong} !important; box-shadow: ${C.pillShadow}; }
+[data-wi-ui] textarea, [data-wi-ui] input:not([type=checkbox]) { border-radius: 12px; }
+[data-wi-ui] :is(button, input, select, textarea, a, summary, [tabindex]):focus-visible { outline: 2px solid ${C.accent}; outline-offset: 3px; }
+[data-wi-ui] button:disabled { opacity: .45; cursor: not-allowed !important; }
+[data-wi-ui] .wi-btn, [data-wi-ui] .wi-card, [data-wi-ui] .wi-seg-btn { translate: 0px 0px; scale: 1; rotate: 0deg; transition: translate .16s ease, scale .16s ease, background .16s ease, box-shadow .16s ease; }
+@media (hover: hover) {
+  [data-wi-ui] .wi-btn:not(:disabled):hover { translate: 0px -1px; }
+  [data-wi-ui] .wi-card:hover { translate: 0px -2px; box-shadow: ${C.cardShadowHover} !important; }
+}
+[data-wi-ui] .wi-btn:not(:disabled):active, [data-wi-ui] .wi-seg-btn:active { scale: .96; }
+[data-wi-ui] .wi-check { appearance: none; position: relative; border-radius: 9999px; background: ${C.surface}; border: 1px solid ${C.borderStrong}; box-shadow: ${C.pillShadow}; }
+[data-wi-ui] .wi-check:checked { background: ${C.primaryBg}; border-color: ${C.primaryBg}; }
+[data-wi-ui] .wi-check:checked::after { content: ''; position: absolute; left: 7px; top: 4px; width: 5px; height: 9px; border: solid ${C.primaryFg}; border-width: 0 2px 2px 0; rotate: 45deg; }
+[data-wi-ui] .wi-well { background: linear-gradient(165deg var(--wi-oklab), ${C.surface} 0%, ${C.bg2} 100%) !important; }
+[data-wi-ui] .wi-list-grid { grid-auto-flow: row dense; }
+@supports (background: linear-gradient(in oklab, white, black)) { [data-wi-ui] { --wi-oklab: in oklab; } }
+@media (max-width: 420px) { [data-wi-ui] .wi-list-grid { grid-template-columns: minmax(0, 1fr) !important; } }
+@media (prefers-reduced-motion: reduce) { [data-wi-ui] *, [data-wi-ui] *::after { animation: none !important; transition: none !important; translate: none !important; scale: none !important; } }
+`);
+
   const ANIM = REDUCE_MOTION
     ? Object.fromEntries(["pop", "fade", "slide", "grow", "slide-up", "spin"].map((k) => [k, null]))
     : { pop: "pop", fade: "fade", slide: "slide", grow: "grow", "slide-up": "slide-up", spin: "spin" };
@@ -192,7 +298,8 @@
   let groupsPromise = null;
   let groupsLoaded = false;
   let selectedSaveGroup = GM_getValue("save_group_id", "default") || "default";
-  const savedItemsCacheWorker = $storage.get().worker;
+  let savedItemsCacheWorker = $storage.get().worker;
+  let savedConnectionVersion = 0;
   const savedItemsCacheRecord = GM_getValue("saved_items_cache_v1", null);
   let savedItemsCache = savedItemsCacheRecord && !Array.isArray(savedItemsCacheRecord)
     && savedItemsCacheRecord.worker === savedItemsCacheWorker
@@ -202,10 +309,28 @@
   if (!Array.isArray(savedItemsCache)) savedItemsCache = null;
   const saveGroupListeners = new Set();
 
+  function resetSavedConnection(worker) {
+    savedConnectionVersion++;
+    savedItemsCacheWorker = worker;
+    cacheSavedItems(null);
+    savedLocal.length = 0;
+    selectedIds.clear();
+    groupsCache = [DEFAULT_GROUP];
+    groupsPromise = null;
+    groupsLoaded = false;
+    savedListGroup = "all";
+    savedListQuery = "";
+    GM_setValue("saved_list_group_v1", "all");
+    GM_setValue("saved_list_query_v1", "");
+    setSaveGroup("default");
+  }
+
   function loadGroups(force = false) {
     if (groupsPromise && !force) return groupsPromise;
+    const connectionVersion = savedConnectionVersion;
     groupsPromise = gmFetch("GET", "/api/groups")
       .then(({ groups }) => {
+        if (connectionVersion !== savedConnectionVersion) throw new Error("Worker 已切换");
         groupsCache = Array.isArray(groups) && groups.length ? groups : [DEFAULT_GROUP];
         groupsLoaded = true;
         if (!groupsCache.some((g) => g.id === selectedSaveGroup)) setSaveGroup("default");
@@ -213,7 +338,7 @@
         return groupsCache;
       })
       .catch((e) => {
-        groupsPromise = null;
+        if (connectionVersion === savedConnectionVersion) groupsPromise = null;
         throw e;
       });
     return groupsPromise;
@@ -232,14 +357,9 @@
     });
     const render = () => {
       const valid = groupsCache.some((g) => g.id === selectedSaveGroup);
-      if (groupsLoaded && !valid) selectedSaveGroup = "default";
-      select.replaceChildren(...groupsCache.map((g) => {
-        const option = h("option", { value: g.id }, g.name);
-        option.value = g.id;
-        return option;
-      }));
-      select.value = selectedSaveGroup;
-      if (!groupsPromise) loadGroups().catch(() => {});
+      select.replaceChildren(...groupsCache.map((g) => h("option", { value: g.id }, g.name)));
+      // 分组尚未返回时显示默认组,保留记忆值,加载完成再恢复有效选择。
+      select.value = valid ? selectedSaveGroup : "default";
     };
     select.addEventListener("change", () => {
       setSaveGroup(select.value);
@@ -248,6 +368,7 @@
     saveGroupListeners.add(render);
     select._disposeGroupListener = () => saveGroupListeners.delete(render);
     render();
+    loadGroups().catch(() => {});
     return select;
   }
 
@@ -1423,7 +1544,7 @@
     return base ? base + "/userscript.user.js" : "";
   };
   const SCRIPT_VERSION =
-    (typeof GM_info !== "undefined" && GM_info.script && GM_info.script.version) || "0.9.2";
+    (typeof GM_info !== "undefined" && GM_info.script && GM_info.script.version) || "0.9.3";
   let versionCache = null;
 
   function renderVersionFooter(el, v) {
@@ -1480,6 +1601,7 @@
     if (!panelEl) return;
     const el = panelEl;
     panelEl = null; // 防止动画期间再次 toggle 复用同一个引用
+    disposeGroupListeners(el);
     if (ANIM.fade && el.isConnected) {
       const panel = el.lastChild;
       if (panel) {
@@ -1497,6 +1619,11 @@
 
   let currentTab = null, tabButtons = {}, tabPages = {};
 
+  function disposeGroupListeners(node) {
+    if (node._disposeGroupListener) node._disposeGroupListener();
+    for (const child of node.children || []) disposeGroupListeners(child);
+  }
+
   // 滚动条样式:只作用于面板内部([data-wi-ui] 后代),不污染宿主页面;webkit 系与 Firefox 各一份
   function injectScrollbarStyle() {
     if (document.getElementById("webbin-scrollbar-style")) return;
@@ -1511,19 +1638,34 @@
     document.head.append(st);
   }
 
+  function applyPanelPos(overlay) {
+    if (!overlay) return;
+    const right = $storage.get().panelPos === "right";
+    overlay.style.setProperty("justify-content", right ? "flex-end" : "center");
+    overlay.style.setProperty("padding", right ? "0 min(3vw, 16px)" : "0");
+    overlay.style.setProperty("box-sizing", "border-box");
+    if (overlay._positionHint) overlay._positionHint.textContent = right ? "靠右悬浮" : "屏幕居中";
+  }
+
+  function bento(...children) {
+    return h("div", { padding: "12px", "border-radius": "18px", background: C.card,
+      border: `1px solid ${C.border}`, "margin-bottom": "12px", "min-width": "0" }, ...children);
+  }
+
   function buildPanel() {
     injectScrollbarStyle();
     const overlay = h("div", {
       position: "fixed", inset: "0", "z-index": "2147483645",
-      background: REDUCE_TRANSPARENCY ? "rgba(0,0,0,0.5)" : "rgba(0,0,0,0.35)",
+      background: REDUCE_TRANSPARENCY ? "rgba(0,0,0,0.5)" : (DARK ? "rgba(0,0,0,0.4)" : "rgba(15,16,18,0.24)"),
       "backdrop-filter": REDUCE_TRANSPARENCY ? "" : "blur(3px)",
       display: "flex",
       "align-items": "center", "justify-content": "center",
     });
+    applyPanelPos(overlay);
     playAnim(overlay, "fade");
     overlay.addEventListener("click", (e) => { if (e.target === overlay) closePanel(); });
 
-    const tabs = h("div", { display: "flex", "border-bottom": `1px solid ${C.border}`, "flex-shrink": "0" });
+    const tabs = h("div", { display: "flex", gap: "4px", margin: "12px 14px 6px", padding: "4px", background: C.bg2, border: `1px solid ${C.border}`, "border-radius": "9999px", "flex-shrink": "0" });
     const body = h("div", { flex: "1", overflow: "auto", padding: "14px" });
     const footer = h("div", {
       display: "flex", "justify-content": "space-between", "align-items": "center",
@@ -1531,13 +1673,13 @@
       "font-size": "11px", color: C.sub, "flex-shrink": "0",
     });
     const panel = h("div", {
-      width: "min(94vw, 500px)", height: "min(86vh, 720px)",
-      background: C.bg, color: C.text, "border-radius": "16px",
+      width: "min(94vw, 540px)", height: "min(84vh, 640px)", "min-width": "0",
+      background: C.bg, color: C.text, "border-radius": "22px",
       border: "1px solid " + C.border,
       display: "flex", "flex-direction": "column", overflow: "hidden",
       "font-size": "14px", "line-height": "1.6",
       "font-family": "system-ui,-apple-system,'Segoe UI',Roboto,sans-serif",
-      "box-shadow": "0 24px 72px rgba(0,0,0,0.4)",
+      "box-shadow": C.panelShadow,
       transition: "opacity .18s ease, transform .18s ease",
     }, tabs, body, footer);
     playAnim(panel, "pop");
@@ -1545,12 +1687,13 @@
 
     for (const [key, label] of [["save", "当前页"], ["list", "已保存"], ["chat", "对话"], ["settings", "设置"]]) {
       const b = h("button", {
-        flex: "1", padding: "12px 0", background: "none", border: "none",
+        flex: "1", padding: "7px 0", "border-radius": "9999px", background: "none", border: "none",
         color: C.sub, "font-size": "14px", cursor: "pointer", "border-bottom": "2px solid transparent",
         transition: "color .15s ease, border-color .15s ease, background .15s ease",
       }, label);
       b.addEventListener("mouseenter", () => { if (currentTab !== key) b.style.setProperty("color", C.text); });
       b.addEventListener("mouseleave", () => { if (currentTab !== key) b.style.setProperty("color", C.sub); });
+      b.className = "wi-seg-btn";
       b.addEventListener("click", () => switchTab(key));
       tabButtons[key] = b;
       tabs.append(b);
@@ -1559,7 +1702,11 @@
 
     const state = { panel, body };
     panel._state = state;
-    initVersionFooter(footer);
+    const version = h("span");
+    overlay._positionHint = h("span", { "white-space": "nowrap", "margin-left": "8px" });
+    footer.append(version, overlay._positionHint);
+    applyPanelPos(overlay);
+    initVersionFooter(version);
     overlay.append(panel);
     return overlay;
   }
@@ -1570,15 +1717,14 @@
     const panel = overlay.lastChild;
     currentTab = key;
     for (const [k, b] of Object.entries(tabButtons)) {
-      b.style.color = k === key ? C.accent : C.sub;
-      b.style.borderBottomColor = k === key ? C.accent : "transparent";
+      b.style.color = k === key ? C.text : C.sub;
+      b.style.background = k === key ? C.surface : "transparent";
+      b.style.fontWeight = k === key ? "600" : "500";
+      b.style.boxShadow = k === key ? C.pillShadow : "none";
+      b.setAttribute("aria-pressed", String(k === key));
     }
     const body = panel._state.body;
-    const dispose = (node) => {
-      if (node._disposeGroupListener) node._disposeGroupListener();
-      for (const child of node.children || []) dispose(child);
-    };
-    for (const child of body.children || []) dispose(child);
+    disposeGroupListeners(body);
     body.replaceChildren();
     // 列表 Tab 顶部内边距归零:批量栏 sticky top:0 才能钉在可见顶边,内容不会从栏上方露出
     // 对话 Tab 自管布局(消息区独立滚动),需关闭 body 滚动并去内边距
@@ -1930,8 +2076,8 @@
     const report = h("div", { "margin-top": "4px", "max-height": "180px", overflow: "auto" });
 
     const box = h("div", {
-      "margin-top": "14px", padding: "10px", background: C.bg2,
-      border: `1px solid ${C.border}`, "border-radius": "10px",
+      "margin-top": "14px", padding: "12px", background: C.card,
+      border: `1px solid ${C.border}`, "border-radius": "18px",
     },
       h("div", { "font-weight": "600", "font-size": "13px", "margin-bottom": "6px" }, `UP主投稿批量字幕(mid: ${space.mid})`),
       h("div", { "font-size": "11px", color: C.sub, "margin-bottom": "8px" },
@@ -2081,7 +2227,7 @@
       status, report,
     );
     const root = h("details", {
-      "margin-top": "14px", "padding-top": "10px", "border-top": `1px solid ${C.border}`,
+      "margin-top": "14px", padding: "12px", background: C.card, border: `1px solid ${C.border}`, "border-radius": "18px",
     }, h("summary", { cursor: "pointer", "font-weight": "600", "font-size": "13px" },
       "批量保存多个网址(网页正文 / B站字幕)"), body);
     root.open = !!st.open;
@@ -2095,20 +2241,23 @@
   }
 
   function buildSaveTab(body) {
+    const card = bento();
+    body.append(card);
+    body = card;
     const vp = getBiliVideoPage(); // 普通视频页(BV/av):提供字幕/评论抓取
     const space = getBiliSpacePage(); // UP 主空间页:提供按时间范围批量抓字幕
     const bili = isBiliPage();
     const groupSelect = makeGroupSelect();
     const titleInput = h("input", {
       width: "100%", "box-sizing": "border-box", padding: "8px 10px",
-      "border-radius": "8px", border: `1px solid ${C.border}`,
+      "border-radius": "12px", border: `1px solid ${C.border}`,
       background: C.bg2, color: C.text, "font-size": "14px",
     });
     titleInput.value = document.title.trim();
 
     const preview = h("div", {
       "margin-top": "10px", "max-height": "300px", overflow: "auto",
-      padding: "10px", background: C.bg2, "border-radius": "8px",
+      padding: "10px", background: C.surface, "border-radius": "12px",
       "white-space": "pre-wrap", "font-size": "13px", color: C.sub,
     }, vp
       ? "「保存字幕」抓取 CC/AI 字幕,「保存评论」按热度抓前 100 条;抓到后自动保存进收集箱。"
@@ -2278,6 +2427,7 @@
   // ---- Tab: 已保存列表 ----
 
   // 跨面板开关保留选择状态(页面刷新即清空)
+  let savedListView = GM_getValue("saved_list_view_v1", "grid") === "list" ? "list" : "grid";
   const selectedIds = new Set();
   // 上一次批量总结的失败报告:{ failures:[{title,msg}], aborted, remain },跨 Tab 重建保留
   let batchReport = null;
@@ -2294,6 +2444,7 @@
   };
 
   function buildListTab(body) {
+    const connectionVersion = savedConnectionVersion;
     // 常驻批量栏:未选择时按钮置灰而不是隐藏,避免出现/消失导致列表跳动
     // 半透明 + backdrop-filter 毛玻璃:内容从栏下滑过时被虚化;底色由 C.bg 派生跟随调色板
     // 滚动区顶部内边距已在 switchTab 归零,栏钉住时从可见顶边盖住,不会露缝
@@ -2301,9 +2452,9 @@
     // prefers-reduced-transparency:开启时退化为实心底色、不做模糊
     const bar = h("div", {
       display: "flex", position: "sticky", top: "0", "z-index": "3",
-      background: REDUCE_TRANSPARENCY ? C.bg : rgbaOf(C.bg, 0.68),
-      padding: "8px 14px", margin: "0 -14px 8px",
-      "border-bottom": `1px solid ${C.border}`,
+      background: REDUCE_TRANSPARENCY ? C.bg : rgbaOf(C.bg, 0.82),
+      padding: "7px 12px", margin: "4px 0 10px", "border-radius": "14px",
+      border: `1px solid ${C.borderStrong}`,
       "align-items": "center", gap: "8px", "flex-wrap": "wrap",
     });
     if (!REDUCE_TRANSPARENCY) {
@@ -2312,9 +2463,27 @@
     }
     const reportEl = h("div");
     const listEl = h("div");
+    const viewButtons = {};
+    const viewToggle = h("div", { display: "flex", padding: "3px", gap: "2px", background: C.bg2, "border-radius": "9999px" });
+    for (const [view, label] of [["grid", "Grid"], ["list", "List"]]) {
+      const b = mkBtn(label, () => {
+        savedListView = view;
+        GM_setValue("saved_list_view_v1", view);
+        renderList();
+      });
+      b.prepend ? b.prepend(svgIcon(view)) : b.append(svgIcon(view));
+      b.setAttribute("aria-label", view === "grid" ? "双列卡片视图" : "紧凑列表视图");
+      viewButtons[view] = b;
+      viewToggle.append(b);
+    }
+    const loadStatus = h("div", { "font-size": "12px", color: C.sub, "margin-bottom": "6px" });
+    loadStatus.setAttribute("role", "status");
+    loadStatus.setAttribute("aria-live", "polite");
     const controls = h("div", { display: "flex", gap: "8px", "align-items": "center", "flex-wrap": "wrap", padding: "10px 0 6px" });
     const searchInput = mkInput(savedListQuery, "搜索标题或网站");
     searchInput.style.setProperty("flex", "1");
+    searchInput.style.setProperty("border-radius", "9999px");
+    searchInput.setAttribute("aria-label", "搜索标题或网站");
     searchInput.style.setProperty("min-width", "150px");
     const refreshBtn = mkBtn("刷新", () => refreshItems(true));
     const groupFilter = h("select", {
@@ -2331,23 +2500,23 @@
         renderList();
       }),
     );
-    controls.append(searchInput, groupFilter, refreshBtn, mkBtn("分组管理", () => { groupManager.open = !groupManager.open; }));
-    body.append(controls, groupManager, bar, reportEl, listEl);
+    controls.append(searchInput, viewToggle, refreshBtn);
+    const filters = h("div", { display: "flex", gap: "8px", "margin-bottom": "8px", "align-items": "center" });
+    filters.append(groupFilter, mkBtn("分组管理", () => { groupManager.open = !groupManager.open; }));
+    body.append(controls, filters, groupManager, loadStatus, bar, reportEl, listEl);
     let items = [];
     let selectedGroup = savedListGroup;
     const barButtons = {};
 
     function renderGroupFilter() {
       const keep = selectedGroup;
-      groupFilter.replaceChildren(...[{ id: "all", name: "全部分组" }, ...groupsCache].map((g) => {
-        const option = h("option", { value: g.id }, g.name);
-        option.value = g.id;
-        return option;
-      }));
-      selectedGroup = groupsCache.some((g) => g.id === keep) || keep === "all" ? keep : "all";
+      groupFilter.replaceChildren(...[{ id: "all", name: "全部分组" }, ...groupsCache]
+        .map((g) => h("option", { value: g.id }, g.name)));
+      const valid = groupsCache.some((g) => g.id === keep) || keep === "all";
+      selectedGroup = !groupsLoaded || valid ? keep : "all";
       savedListGroup = selectedGroup;
       try { GM_setValue("saved_list_group_v1", selectedGroup); } catch { /* 筛选仍可使用 */ }
-      groupFilter.value = selectedGroup;
+      groupFilter.value = valid ? selectedGroup : "all";
     }
 
     const visibleItems = () => {
@@ -2359,6 +2528,7 @@
     };
 
     function mergeRemoteItems(remote) {
+      if (connectionVersion !== savedConnectionVersion) return;
       const remoteIds = new Set(remote.map((x) => x.id));
       for (let i = savedLocal.length - 1; i >= 0; i--) {
         if (remoteIds.has(savedLocal[i].id)) savedLocal.splice(i, 1);
@@ -2377,9 +2547,20 @@
     function refreshItems(manual = false) {
       refreshBtn.disabled = true;
       if (manual) refreshBtn.textContent = "刷新中…";
+      loadStatus.style.setProperty("color", C.sub);
+      loadStatus.textContent = savedItemsCache ? "已显示本地缓存,正在刷新…" : "正在加载最新资料…";
       return gmFetch("GET", "/api/items")
-        .then(({ items: remote }) => mergeRemoteItems(remote))
+        .then(({ items: remote }) => {
+          if (connectionVersion !== savedConnectionVersion) return;
+          mergeRemoteItems(remote);
+          loadStatus.textContent = "已更新 · " + new Date().toLocaleTimeString("zh-CN", { hour12: false });
+        })
         .catch((e) => {
+          if (connectionVersion !== savedConnectionVersion) return;
+          loadStatus.style.setProperty("color", C.danger);
+          loadStatus.textContent = savedItemsCache
+            ? "刷新失败,当前显示本地缓存: " + e.message
+            : "加载失败: " + e.message;
           if (!savedItemsCache) {
             listEl.replaceChildren(h("div", { color: C.danger, padding: "20px", "text-align": "center" }, "加载失败: " + e.message));
           } else if (manual) toast("刷新失败: " + e.message, true);
@@ -2436,6 +2617,16 @@
     };
 
     const renderList = () => {
+      listEl.className = savedListView === "grid" ? "wi-list-grid" : "wi-list-rows";
+      listEl.style.setProperty("display", savedListView === "grid" ? "grid" : "flex");
+      listEl.style.setProperty("grid-template-columns", "repeat(2, minmax(0, 1fr))");
+      listEl.style.setProperty("flex-direction", "column");
+      listEl.style.setProperty("gap", savedListView === "grid" ? "10px" : "8px");
+      for (const [view, b] of Object.entries(viewButtons)) {
+        b.style.background = view === savedListView ? C.surface : "transparent";
+        b.style.boxShadow = view === savedListView ? C.pillShadow : "none";
+        b.setAttribute("aria-pressed", String(view === savedListView));
+      }
       listEl.replaceChildren();
       if (!items.length) {
         listEl.append(h("div", { color: C.sub, padding: "20px", "text-align": "center" }, "还没有保存过内容"));
@@ -2480,7 +2671,7 @@
           border: `1px solid ${C.border}`, background: C.bg2, color: C.text, "font-size": "13px",
         });
         sel.append(h("option", { value: "default" }, "默认"));
-      for (const g of groupsCache.filter((x) => !x.builtin)) sel.append(h("option", { value: g.id }, g.name));
+        for (const g of groupsCache.filter((x) => !x.builtin)) sel.append(h("option", { value: g.id }, g.name));
         const okBtn = mkBtn("确定", C.accent, true, () => batchMoveConfirm(sel.value));
         const cancelBtn = mkBtn("取消", undefined, false, batchMoveCancel);
         okBtn.disabled = !n;
@@ -2594,9 +2785,9 @@
     // 逐条记录失败原因;连续 2 条相同错误视为系统性问题(模型不存在/密钥无效/限流),提前中止不再干等
     async function batchSummarize() {
       if (batchBusy) return;
-    const selectedItems = visibleItems().filter((it) => selectedIds.has(it.id));
-    const targets = selectedItems.filter((it) => it.has_content && !it.has_summary);
-    const skipped = selectedItems.length - targets.length;
+      const selectedItems = visibleItems().filter((it) => selectedIds.has(it.id));
+      const targets = selectedItems.filter((it) => it.has_content && !it.has_summary);
+      const skipped = selectedItems.length - targets.length;
       if (!targets.length) {
         toast("所选条目都没有可总结的正文(无正文或已有总结)");
         return;
@@ -2648,7 +2839,7 @@
       try {
         const { items: fullItems } = await gmFetch("GET", "/api/items?full=1");
         const byId = new Map(fullItems.map((x) => [x.id, x]));
-      const chosen = visibleItems()
+        const chosen = visibleItems()
           .filter((it) => selectedIds.has(it.id))
           .map((it) => byId.get(it.id) || savedLocal.find((x) => x.id === it.id) || it);
         if (!chosen.length) throw new Error("没有可导出的条目");
@@ -2673,19 +2864,23 @@
     } else {
       listEl.append(loading);
     }
-    refreshListGroups();
-    Promise.allSettled([loadGroups(), refreshItems()])
-      .then(([groupResult, itemResult]) => {
-        if (groupResult.status === "fulfilled") { renderGroupFilter(); renderList(); }
-      });
+    loadGroups().then(() => {
+      if (connectionVersion !== savedConnectionVersion) return;
+      renderGroupFilter();
+      if (savedItemsCache) renderList();
+      renderBar();
+    }).catch(() => { /* 分组失败不阻塞资料列表 */ });
+    refreshItems();
   }
 
   function mkCheckbox(checked) {
     const cb = document.createElement("input");
     cb.type = "checkbox";
+    cb.className = "wi-check";
+    cb.setAttribute("aria-label", "选择条目");
     cb.checked = !!checked;
-    cb.style.setProperty("width", "16px");
-    cb.style.setProperty("height", "16px");
+    cb.style.setProperty("width", "22px");
+    cb.style.setProperty("height", "22px");
     cb.style.setProperty("accent-color", C.accent);
     cb.style.setProperty("cursor", "pointer");
     cb.style.setProperty("flex-shrink", "0");
@@ -2694,33 +2889,52 @@
   }
 
   function renderListItem(it, onChange) {
-    const date = new Date(it.created_at).toLocaleString("zh-CN", { hour12: false });
+    const grid = savedListView === "grid";
+    const date = new Date(it.created_at).toLocaleDateString("zh-CN");
     const groupName = groupsCache.find((g) => g.id === (it.group_id || "default"))?.name || "默认";
-    const badges = h("span", { "font-size": "11px", "margin-left": "4px" },
-      it.type === "bilibili" ? " 📺B站" : "",
-      it.has_summary ? " ✨已总结" : "",
-      it.status === "archived" ? " ✅已归档" : "");
+    const badges = h("span", { display: "flex", gap: "3px", "flex-wrap": "wrap", "justify-content": "flex-end" });
+    for (const label of [it.type === "bilibili" && "B站", it.has_summary && "已总结", it.status === "archived" && "已归档"].filter(Boolean)) {
+      badges.append(h("span", { "font-size": "10px", padding: "2px 6px", "border-radius": "9999px", background: C.bg2, color: C.sub }, label));
+    }
     const cb = mkCheckbox(selectedIds.has(it.id));
+    cb.setAttribute("aria-label", "选择 " + it.title);
     cb.addEventListener("click", (e) => e.stopPropagation());
+    const row = h("div", { display: "flex", "flex-direction": grid ? "column" : "row", gap: grid ? "0" : "10px",
+      padding: grid ? "8px" : "10px 12px", "border-radius": grid ? "18px" : "14px", background: C.card,
+      border: `1px solid ${selectedIds.has(it.id) ? C.primaryBg : C.border}`, "box-shadow": C.cardShadow,
+      "min-width": "0", cursor: "pointer" });
+    row.className = "wi-card";
     cb.addEventListener("change", () => {
-      if (cb.checked) selectedIds.add(it.id);
-      else selectedIds.delete(it.id);
+      if (cb.checked) selectedIds.add(it.id); else selectedIds.delete(it.id);
+      row.style.setProperty("border-color", cb.checked ? C.primaryBg : C.border);
       onChange();
     });
-    const metaRow = h("div", { "font-size": "12px", color: C.sub, "margin-top": "2px", display: "flex", "align-items": "center", "flex-wrap": "wrap" },
-      h("span", {}, `${it.site} · ${date} · ${groupName}`), badges);
-    const textBlock = h("div", { flex: "1", "min-width": "0" },
-      h("div", { "font-weight": "600", overflow: "hidden", "text-overflow": "ellipsis", "white-space": "nowrap" }, it.title),
-      metaRow,
-    );
-    const row = h("div", {
-      display: "flex", "align-items": "flex-start",
-      padding: "10px 12px", "border-bottom": `1px solid ${C.border}`,
-      cursor: "pointer", transition: "background .15s ease",
-    }, cb, textBlock);
-    row.addEventListener("mouseenter", () => row.style.setProperty("background", C.bg2));
-    row.addEventListener("mouseleave", () => row.style.setProperty("background", "transparent"));
-    textBlock.addEventListener("click", () => openDetail(row, it.id));
+    const title = h("div", { "font-weight": "600", "font-size": "13px", "line-height": "1.4", display: "-webkit-box",
+      "-webkit-line-clamp": "2", "-webkit-box-orient": "vertical", overflow: "hidden", "overflow-wrap": "anywhere" }, it.title);
+    const link = h("a", { target: "_blank", rel: "noopener noreferrer", color: C.sub, display: "inline-flex", padding: "3px" }, svgIcon("external", 13));
+    if (/^https?:\/\//i.test(it.url || "")) link.href = it.url;
+    link.setAttribute("aria-label", "打开原文: " + it.title);
+    link.addEventListener("click", (e) => e.stopPropagation());
+    const textBlock = h("div", { padding: grid ? "8px 4px 2px" : "0", "min-width": "0", flex: "1" }, title,
+      h("div", { display: "flex", "align-items": "center", gap: "4px", color: C.sub, "font-size": "11px" },
+        h("span", { overflow: "hidden", "text-overflow": "ellipsis", "white-space": "nowrap" }, it.site), link));
+    if (grid) {
+      const well = h("div", { padding: "9px 10px", "border-radius": "11px", background: C.surface, border: `1px solid ${C.border}`,
+        "min-height": "68px", display: "flex", "flex-direction": "column", "justify-content": "space-between", gap: "6px" },
+        h("div", { display: "flex", "align-items": "center", "justify-content": "space-between" }, cb, badges),
+        h("div", { "font-size": "11px", color: C.sub, "overflow-wrap": "anywhere" }, `${groupName} · ${date}`));
+      well.className = "wi-well";
+      row.append(well, textBlock);
+    } else {
+      textBlock.append(h("div", { "font-size": "11px", color: C.sub }, `${groupName} · ${date}`), badges);
+      row.append(cb, textBlock);
+    }
+    row.tabIndex = 0;
+    row.setAttribute("aria-label", "查看详情: " + it.title);
+    row.addEventListener("click", () => openDetail(row, it.id));
+    row.addEventListener("keydown", (e) => {
+      if (e.target === row && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); openDetail(row, it.id); }
+    });
     return row;
   }
 
@@ -2731,7 +2945,7 @@
     // 本地暂存(KV 传播期间)优先,避免单条读取撞上副本延迟而 404
     Promise.resolve(local ? local : gmFetch("GET", "/api/item/" + id))
       .then((it) => {
-        const detail = h("div", { padding: "10px", background: C.bg2, "border-bottom": `1px solid ${C.border}` });
+        const detail = h("div", { padding: "12px", background: C.card, border: `1px solid ${C.border}`, "border-radius": "18px", "grid-column": "1 / -1", "min-width": "0" });
         playAnim(detail, "slide");
         detail._detail = true;
 
@@ -2866,6 +3080,25 @@
 
   function buildSettingsTab(body) {
     const { worker, token } = $storage.get();
+    const positions = h("div", { display: "flex", gap: "4px", padding: "4px", background: C.bg2, "border-radius": "9999px", "margin-top": "10px" });
+    const positionButtons = {};
+    const paintPosition = () => {
+      for (const [pos, b] of Object.entries(positionButtons)) {
+        const active = $storage.get().panelPos === pos;
+        b.style.background = active ? C.surface : "transparent";
+        b.style.boxShadow = active ? C.pillShadow : "none";
+        b.setAttribute("aria-pressed", String(active));
+      }
+    };
+    for (const [pos, label] of [["center", "屏幕居中"], ["right", "靠右悬浮"]]) {
+      const b = mkBtn(label, () => {
+        $storage.set("panelPos", pos); applyPanelPos(panelEl); paintPosition(); toast("面板位置: " + label);
+      });
+      b.style.setProperty("flex", "1");
+      positionButtons[pos] = b; positions.append(b);
+    }
+    paintPosition();
+    body.append(bento(h("div", { "font-weight": "600" }, "界面与弹出位置"), positions));
     const field = (labelText, input) =>
       h("div", { "margin-bottom": "12px" },
         h("div", { "font-size": "12px", color: C.sub, "margin-bottom": "4px" }, labelText), input);
@@ -2887,16 +3120,20 @@
     const withEye = (input) => {
       const wrap = h("div", { position: "relative", display: "block" }, input);
       input.style.setProperty("padding-right", "34px");
-      const eye = h("span", {
+      const eye = h("button", {
         position: "absolute", right: "8px", top: "50%", transform: "translateY(-50%)",
         cursor: "pointer", "font-size": "14px", "user-select": "none",
         "line-height": "1", "z-index": "1", opacity: "0.75",
-      }, "👁");
+        background: "transparent", border: "none", padding: "6px",
+      }, svgIcon("eye"));
       eye.title = "显示/隐藏";
+      eye.setAttribute("aria-label", "显示/隐藏密码");
+      eye.setAttribute("aria-pressed", "false");
       eye.addEventListener("click", () => {
         const show = input.type === "password";
         input.type = show ? "text" : "password";
-        eye.textContent = show ? "🚫" : "👁";
+        eye.replaceChildren(svgIcon(show ? "eyeOff" : "eye"));
+        eye.setAttribute("aria-pressed", String(show));
         eye.style.opacity = show ? "1" : "0.75";
       });
       wrap.append(eye);
@@ -3027,16 +3264,18 @@
     });
 
     body.append(
+      bento(h("div", { "font-weight": "600", "margin-bottom": "10px" }, "Cloudflare Worker 连接"),
       field("Worker 地址", workerInput),
       field("Token", withEye(tokenInput)),
       h("div", { display: "flex", gap: "8px", "flex-wrap": "wrap", margin: "12px 0" }, saveLocal, testConn, loadCfg),
-      h("div", { height: "1px", background: C.border, margin: "12px 0" }),
+      ),
+      bento(h("div", { "font-weight": "600", "margin-bottom": "10px" }, "LLM 模型配置与分组管理"),
       field("LLM API Base(OpenAI 兼容)", apiBaseInput),
       field("API Key(存服务端 KV,前端只回显掩码)", withEye(apiKeyInput)),
       field("模型(先保存 api_base/key 后可拉列表)", modelSelect),
       field("或手动输入模型名", modelInput),
       h("div", { display: "flex", gap: "8px", "flex-wrap": "wrap" }, saveCfg, refreshModels),
-      renderGroupManager(),
+      renderGroupManager()),
     );
   }
 
@@ -3636,7 +3875,7 @@
       h("span", { "flex-shrink": "0", "font-size": "10px", color: C.sub }, stateText));
     const card = h("div", {
       "max-width": "94%", margin: "4px 0", padding: "6px 9px",
-      "border-radius": "9px", background: C.bg2, border: "1px solid " + C.border,
+      "border-radius": "14px", background: C.card, border: "1px solid " + C.border,
       "font-size": "12px", cursor: res ? "pointer" : "default",
       transition: "border-color .15s ease",
     }, head);
@@ -3644,8 +3883,8 @@
     card.addEventListener("mouseenter", () => { if (res) card.style.setProperty("border-color", C.accentRing); });
     card.addEventListener("mouseleave", () => card.style.setProperty("border-color", C.border));
     const detailBox = h("div", {
-      "margin-top": "5px", padding: "5px 8px", background: C.bg,
-      "border-radius": "7px", "font-size": "11px", color: C.sub,
+      "margin-top": "5px", padding: "5px 8px", background: C.surface,
+      "border-radius": "10px", "font-size": "11px", color: C.sub,
       "white-space": "pre-wrap", "word-break": "break-all", display: "none",
     });
     for (const line of detail) detailBox.append(h("div", { "margin-top": "2px" }, line));
@@ -3672,7 +3911,8 @@
       const wasNear = chatNearBottom(); // 重绘前判断贴底:贴底才自动跟随,上翻阅读不被拽走
       // 发送/停止合一:空闲 ➤ 发送,运行中 ■ 停止
       sendBtn.textContent = chat.running ? "■" : "➤";
-      sendBtn.style.setProperty("background", chat.running ? C.danger : C.accent);
+      sendBtn.style.setProperty("background", chat.running ? C.danger : C.primaryBg);
+      sendBtn.style.setProperty("color", chat.running ? "#fff" : C.primaryFg);
       sendBtn.title = chat.running ? "停止" : "发送";
       sendBtn.style.setProperty("opacity", !chat.running && !input.value.trim() ? "0.45" : "1"); // 空输入降级
       if (historyBtnEl && historyBtnEl.isConnected) {
@@ -3713,8 +3953,8 @@
         if (m.role === "user") {
           const bubble = h("div", {
             "max-width": "88%", "margin-left": "auto", "margin-bottom": "8px",
-            padding: "8px 11px", "border-radius": "14px 4px 14px 14px", "white-space": "pre-wrap",
-            "font-size": "13px", background: C.accent, color: "#fff",
+            padding: "8px 11px", "border-radius": "18px 18px 6px 18px", "box-shadow": C.pillShadow, "white-space": "pre-wrap",
+            "font-size": "13px", background: C.primaryBg, color: C.primaryFg,
             "line-height": "1.6", "word-break": "break-word",
           }, m.content);
           markAnim(bubble, m, "slide-up");
@@ -3736,8 +3976,8 @@
           const textNode = document.createTextNode(shown);
           const wrap = h("div", {
             "max-width": "94%", "margin-bottom": "10px", padding: "8px 11px",
-            "border-radius": "4px 14px 14px 14px", "white-space": "pre-wrap", "font-size": "13px",
-            background: C.bg2, color: C.text, border: "1px solid " + C.border,
+            "border-radius": "6px 18px 18px 18px", "box-shadow": C.cardShadow, "white-space": "pre-wrap", "font-size": "13px",
+            background: C.surface, color: C.text, border: "1px solid " + C.border,
             "line-height": "1.6", "word-break": "break-word",
           }, textNode);
           if (isReveal) { // 打字机:占位光标逐字放出;气泡文本节点直接持有,tick 局部更新不重绘
@@ -3751,7 +3991,8 @@
             // 引用锚点直接持有元素引用构建,不用 lastChild 回找(文本节点上没有 querySelector,曾致渲染中断)
             const refBox = h("div", { "margin-top": "6px", "font-size": "11px", color: C.sub }, "来源:");
             for (const r of refs) {
-              const a = h("a", { color: C.accent, cursor: "pointer", "font-size": "11px", "word-break": "break-all" }, "· " + r.title);
+              const a = h("a", { color: C.accent, cursor: "pointer", "font-size": "11px", "word-break": "break-all",
+                display: "inline-block", padding: "3px 8px", "border-radius": "9999px", background: C.bg2, border: `1px solid ${C.border}` }, r.title);
               if (/^https?:\/\//i.test(r.url || "")) { // 只放行 http(s),防 javascript: 等 scheme
                 a.href = r.url;
                 a.target = "_blank";
@@ -3907,8 +4148,8 @@
       topRow.replaceChildren();
       const mini = (label, fn, tip) => {
         const b = h("button", {
-          padding: "4px 9px", "border-radius": "7px", cursor: "pointer", "font-size": "12px",
-          border: "1px solid " + C.border, background: "transparent", color: C.text,
+          padding: "5px 12px", "border-radius": "9999px", cursor: "pointer", "font-size": "12px",
+          border: "1px solid " + C.borderStrong, background: C.surface, color: C.text,
           transition: "background .15s ease, border-color .15s ease, transform .12s ease",
         }, label);
         b.title = tip || label;
@@ -3954,7 +4195,7 @@
         display: "inline-flex", "align-items": "center", gap: "5px",
         "max-width": "42%", "min-width": "0", overflow: "hidden",
         padding: "6px 8px", "border-radius": "8px", cursor: "pointer", "font-size": "12px",
-        border: "none", background: "transparent", color: C.sub,
+        border: "1px solid " + C.border, background: C.surface, color: C.sub,
       }, label, h("span", { "flex-shrink": "0", "font-size": "10px" }, "▼"));
       btn.title = title;
       // 面板锚定整个输入框(composer 设 relative):横跨输入框宽度、悬在底行上方,
@@ -3963,8 +4204,8 @@
         position: "absolute", left: "10px", right: "10px", bottom: "50px",
         background: REDUCE_TRANSPARENCY ? C.bg : rgbaOf(C.bg, 0.92),
         "backdrop-filter": REDUCE_TRANSPARENCY ? "" : "blur(12px)",
-        border: "1px solid " + C.border, "border-radius": "12px",
-        "box-shadow": "0 10px 32px rgba(0,0,0,0.35)", padding: "10px",
+        border: "1px solid " + C.border, "border-radius": "16px",
+        "box-shadow": C.panelShadow, padding: "10px",
         "max-height": "min(430px, 55vh)", overflow: "auto",
         "z-index": "30", display: "none",
       });
@@ -4212,8 +4453,8 @@
 
     // 发送/停止合一:空闲 ➤ 发送,运行中 ■ 停止(同一位置,状态由 renderChat 同步)
     const sendBtn = h("button", {
-      width: "38px", height: "38px", "border-radius": "50%", cursor: "pointer",
-      border: "none", background: C.accent, color: "#fff", "font-size": "16px",
+      width: "34px", height: "34px", "border-radius": "50%", cursor: "pointer",
+      border: "none", background: C.primaryBg, color: C.primaryFg, "font-size": "16px",
       "flex-shrink": "0", "line-height": "1",
       transition: "background .15s ease, transform .12s ease, opacity .15s ease",
     }, "➤");
@@ -4233,7 +4474,7 @@
     // 输入框是三个下拉面板的定位基准(relative):面板横跨输入框宽度、悬在底行上方,窄屏也不会跑出面板外
     const composer = h("div", {
       display: "flex", "flex-direction": "column", position: "relative",
-      border: "1px solid " + C.border, background: C.bg2, "border-radius": "12px",
+      border: "1px solid " + C.borderStrong, background: C.bg2, "border-radius": "18px",
       padding: "8px 10px", "flex-shrink": "0",
     }, input, bottomRow);
     composer.append(drops.groups.panel, drops.items.panel, drops.model.panel);
@@ -4300,15 +4541,17 @@
   function mkBtn(label, color, primary, onClick) {
     if (typeof color === "function") { onClick = color; color = undefined; primary = false; }
     const b = h("button", {
-      padding: "8px 14px", "border-radius": "8px", cursor: "pointer",
-      "font-size": "13px", border: `1px solid ${color || C.border}`,
-      background: primary ? (color || C.accent) : "transparent",
-      color: primary ? "#fff" : (color || C.text),
+      padding: "6px 14px", "border-radius": "9999px", cursor: "pointer",
+      display: "inline-flex", "align-items": "center", "justify-content": "center", gap: "5px",
+      "font-size": "12px", "font-weight": "500", border: `1px solid ${primary ? "transparent" : (color || C.borderStrong)}`,
+      background: primary ? (!color || color === C.accent ? C.primaryBg : color) : C.surface,
+      color: primary ? (!color || color === C.accent ? C.primaryFg : "#fff") : (color || C.text),
+      "box-shadow": C.pillShadow,
       transition: "opacity .12s ease, transform .12s ease",
     }, label);
     b.addEventListener("mouseenter", () => { if (!b.disabled) b.style.setProperty("opacity", "0.88"); });
     b.addEventListener("mouseleave", () => b.style.setProperty("opacity", ""));
-    b.addEventListener("mousedown", () => b.style.setProperty("transform", "scale(0.96)"));
+    b.className = "wi-btn";
     b.addEventListener("mouseup", () => b.style.setProperty("transform", ""));
     b.addEventListener("mouseleave", () => b.style.setProperty("transform", ""));
     b.addEventListener("click", onClick);
@@ -4318,18 +4561,20 @@
   function mkInput(value, placeholder) {
     const i = h("input", {
       width: "100%", "box-sizing": "border-box", padding: "8px 10px",
-      "border-radius": "8px", border: `1px solid ${C.border}`,
+      "border-radius": "12px", border: `1px solid ${C.border}`,
       background: C.bg2, color: C.text, "font-size": "14px",
       transition: "border-color .15s ease, box-shadow .15s ease",
     });
     i.value = value || "";
     i.placeholder = placeholder || "";
     i.addEventListener("focus", () => {
-      i.style.setProperty("border-color", C.accent);
+      i.style.setProperty("border-color", C.borderStrong);
+      i.style.setProperty("background", C.surface);
       i.style.setProperty("box-shadow", "0 0 0 3px " + C.accentSoft);
     });
     i.addEventListener("blur", () => {
       i.style.setProperty("border-color", C.border);
+      i.style.setProperty("background", C.bg2);
       i.style.setProperty("box-shadow", "");
     });
     return i;

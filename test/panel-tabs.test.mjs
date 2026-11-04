@@ -8,10 +8,18 @@ const check = (name, cond, detail) => {
   else { fail++; console.log(`  ✗ ${name}  ${detail || ""}`); }
 };
 
-const { docEl: root } = runScript({
+const script = runScript({
   innerWidth: 1280, innerHeight: 800,
   storeBox: { init: { worker: "https://w.dev", token: "t" } },
 });
+const { docEl: root } = script;
+script.env.GM_xmlhttpRequest = (request) => {
+  const path = new URL(request.url).pathname;
+  const item = { id: "ui1", title: "布局回归资料", site: "example.com", url: "https://example.com", created_at: 1, group_id: "default" };
+  const data = path === "/api/items" ? { items: [item] } : path.startsWith("/api/item/") ? item : { groups: [] };
+  queueMicrotask(() => request.onload({ status: 200, responseText: JSON.stringify(data) }));
+  return { abort() {} };
+};
 
 // 打开面板:点悬浮球(无位移 = 点击)
 const btn = findAll(root, (e) => e.title === "Webbin 收集箱")[0];
@@ -64,5 +72,37 @@ console.log("面板标签切换后的滚动容器状态");
 }
 
 await settle();
+console.log("StashDock 布局与偏好回归");
+const byButton = (text) => findAll(root, (e) => e.tagName === "BUTTON" && e.textContent.trim() === text)[0];
+const panel = panelOf(root);
+check("紧凑面板尺寸", panel.style.all().width === "min(94vw, 540px)" && panel.style.all().height === "min(84vh, 640px)");
+click(tabButton(root, "设置"));
+click(byButton("靠右悬浮"));
+check("靠右位置立即生效并持久化", panel.parentElement.style.all()["justify-content"] === "flex-end" && script.store.panel_pos === "right");
+click(tabButton(root, "当前页"));
+click(tabButton(root, "设置"));
+check("位置设置切 Tab 保留", byButton("靠右悬浮")._attrs["aria-pressed"] === "true");
+click(byButton("屏幕居中"));
+check("恢复居中并清理边距", panel.parentElement.style.all()["justify-content"] === "center" && panel.parentElement.style.all().padding === "0" && script.store.panel_pos === "center");
+click(tabButton(root, "已保存"));
+await settle();
+const list = () => findAll(root, (e) => e.className === "wi-list-grid" || e.className === "wi-list-rows")[0];
+check("默认双列网格", list().style.all().display === "grid" && list().style.all()["grid-template-columns"] === "repeat(2, minmax(0, 1fr))");
+let row = findAll(list(), (e) => e.className === "wi-card")[0];
+click(row);
+await settle();
+check("卡片详情横跨双列", findAll(list(), (e) => e._detail)[0]?.style.all()["grid-column"] === "1 / -1");
+const cb = findAll(row, (e) => e.type === "checkbox")[0];
+cb.checked = true;
+cb.fire("change");
+click(byButton("List"));
+check("切换紧凑列表并持久化", list().style.all().display === "flex" && script.store.saved_list_view_v1 === "list");
+check("切视图保留选择", findAll(list(), (e) => e.type === "checkbox")[0].checked);
+click(tabButton(root, "设置"));
+click(tabButton(root, "已保存"));
+await settle();
+check("切 Tab 保留列表视图", list().style.all().display === "flex");
+click(byButton("Grid"));
+check("可恢复双列视图", list().style.all().display === "grid" && script.store.saved_list_view_v1 === "grid");
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exitCode = fail ? 1 : 0;
