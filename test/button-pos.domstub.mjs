@@ -198,15 +198,17 @@ export function byText(root, txt, tag) {
   return findAll(root, (e) => (!tag || e.tagName === tag) && (e.textContent || "").trim() === txt)[0];
 }
 
-// 面板结构固定为 [tabs, body, footer];直接从标签按钮所在行定位,避免遍历到宿主页其他 DIV
+// 面板结构固定为 [header(含 tabs), body, footer];从标签按钮所在容器向上定位 data-wi-ui 面板根节点
 export function panelOf(root) {
   const tabsRow = findAll(root, (e) => e.tagName === "DIV" && e.children.length === 4 && e.children.every((c) => c.tagName === "BUTTON"))[0];
-  return tabsRow?.parentElement || null;
+  let p = tabsRow?.parentElement || null;
+  while (p && p._attrs["data-wi-ui"] == null && p.parentElement) p = p.parentElement;
+  return p;
 }
 
 export function tabButton(root, label) {
-  const panel = panelOf(root);
-  return panel ? panel.children[0].children.find((b) => (b.textContent || "").trim() === label) : undefined;
+  const tabsRow = findAll(root, (e) => e.tagName === "DIV" && e.children.length === 4 && e.children.every((c) => c.tagName === "BUTTON"))[0];
+  return tabsRow ? tabsRow.children.find((b) => (b.textContent || "").trim() === label) : undefined;
 }
 
 export function scrollBodyOf(root) {

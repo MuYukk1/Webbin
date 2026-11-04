@@ -82,7 +82,7 @@
   window.GM_setValue = (k, v) => store.set(k, v);
   window.GM_deleteValue = (k) => store.delete(k);
   window.GM_addStyle = (css) => { const s = document.createElement("style"); s.textContent = css; document.head.append(s); };
-  window.GM_info = { script: { version: "0.9.4" } };
+  window.GM_info = { script: { version: "0.9.5" } };
   window.GM_registerMenuCommand = () => {};
 
   let chatCalls = 0;
@@ -90,7 +90,7 @@
     const respond = (status, body) => Promise.resolve().then(() => d.onload && d.onload({ status, responseText: typeof body === "string" ? body : JSON.stringify(body) }));
     let p = "";
     try { p = new URL(d.url).pathname; } catch { /* 忽略 */ }
-    if (p.endsWith("/userscript.user.js")) { respond(200, "// ==UserScript==\n// @version 0.9.4\n// ==/UserScript=="); return { abort() {} }; }
+    if (p.endsWith("/userscript.user.js")) { respond(200, "// ==UserScript==\n// @version 0.9.5\n// ==/UserScript=="); return { abort() {} }; }
     if (p === "/api/kb/metadata") { respond(200, { total: ITEMS.length, items: ITEMS, next_cursor: null }); return { abort() {} }; }
     if (p === "/api/items") { respond(200, { items: ITEMS }); return { abort() {} }; }
     if (p === "/api/groups") { respond(200, { groups: [{ id: "g1", name: "前端" }, { id: "g2", name: "AI 工具" }] }); return { abort() {} }; }

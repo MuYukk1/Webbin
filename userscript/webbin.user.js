@@ -3,7 +3,7 @@
 // @name:en      Webbin Saver
 // @description  保存网页正文/B站视频到自己的 Cloudflare Worker,双端 Edge 可用;B站视频可抓取字幕/评论、UP主主页按时间范围批量抓字幕、批量保存多个网址,AI 总结、分组管理与知识库对话(工具调用 Agent)、下载归档
 // @namespace    https://github.com/local/webbin
-// @version      0.9.4
+// @version      0.9.5
 // @updateURL    /userscript.user.js
 // @author       you
 // @match        *://*/*
@@ -202,6 +202,16 @@
       ["path", { d: "M12.586 2.586A2 2 0 0 0 11.172 2H4a2 2 0 0 0-2 2v7.172a2 2 0 0 0 .586 1.414l8.704 8.704a2.426 2.426 0 0 0 3.42 0l6.58-6.58a2.426 2.426 0 0 0 0-3.42z" }],
       ["circle", { cx: "7.5", cy: "7.5", r: "1" }],
     ],
+    check: [["path", { d: "M20 6 9 17l-5-5" }]],
+    sparkles: [["path", { d: "M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z" }]],
+    chevDown: [["path", { d: "m6 9 6 6 6-6" }]],
+    send: [["path", { d: "m22 2-7 20-4-9-9-4Z" }], ["path", { d: "M22 2 11 13" }]],
+    plus: [["path", { d: "M5 12h14" }], ["path", { d: "M12 5v14" }]],
+    history: [
+      ["path", { d: "M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" }],
+      ["path", { d: "M3 3v5h5" }],
+      ["path", { d: "M12 7v5l4 2" }],
+    ],
     eye: [
       ["path", { d: "M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0" }],
       ["circle", { cx: "12", cy: "12", r: "3" }],
@@ -243,6 +253,8 @@
   };
   C.accentSoft = rgbaOf(C.accent, 0.12); // hover 底色/聚焦微光
   C.accentRing = rgbaOf(C.accent, 0.28); // 聚焦描边
+  C.okSoft = rgbaOf(C.ok, 0.14);
+  C.dangerSoft = rgbaOf(C.danger, 0.14);
 
   // 尊重「减少动态效果」系统设置:开启时禁用所有进出场/过渡动画
   const REDUCE_MOTION = matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -276,6 +288,8 @@
   }
 
   const SELECT_ARROW = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='${encodeURIComponent(C.sub)}' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E")`;
+  const CHECK_ICON_MUTED = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='${encodeURIComponent(C.muted)}' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 6 9 17l-5-5'/%3E%3C/svg%3E")`;
+  const CHECK_ICON_ACTIVE = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='${encodeURIComponent(C.primaryFg)}' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 6 9 17l-5-5'/%3E%3C/svg%3E")`;
   if (typeof GM_addStyle === "function") GM_addStyle(`
 [data-wi-ui] { --wi-oklab: ; color-scheme: ${DARK ? "dark" : "light"}; }
 [data-wi-ui] *, [data-wi-ui] *::after { box-sizing: border-box; }
@@ -315,9 +329,26 @@
   [data-wi-ui] .wi-card:hover { translate: 0px -2px; box-shadow: ${C.cardShadowHover} !important; border-color: ${C.borderStrong} !important; }
 }
 [data-wi-ui] .wi-btn:not(:disabled):active, [data-wi-ui] .wi-seg-btn:active { scale: .96; }
-[data-wi-ui] .wi-check { appearance: none; position: relative; border-radius: 9999px; background: ${C.surface}; border: 1px solid ${C.borderStrong}; box-shadow: ${C.pillShadow}; transition: background .15s ease, border-color .15s ease, scale .12s ease; }
-[data-wi-ui] .wi-check:checked { background: ${C.primaryBg}; border-color: ${C.primaryBg}; }
-[data-wi-ui] .wi-check:checked::after { content: ''; position: absolute; left: 7px; top: 4px; width: 5px; height: 9px; border: solid ${C.primaryFg}; border-width: 0 2px 2px 0; rotate: 45deg; }
+[data-wi-ui] .wi-check {
+  appearance: none; -webkit-appearance: none; position: relative;
+  width: 24px !important; height: 24px !important;
+  border-radius: 9999px !important;
+  background-color: ${C.surface};
+  background-image: ${CHECK_ICON_MUTED};
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: 12px 12px;
+  border: 1px solid ${C.borderStrong};
+  box-shadow: ${C.pillShadow};
+  transition: background-color .15s ease, border-color .15s ease, scale .14s cubic-bezier(.22,1,.36,1);
+}
+[data-wi-ui] .wi-check:hover { scale: 1.08; border-color: ${C.sub}; }
+[data-wi-ui] .wi-check:active { scale: 0.92; }
+[data-wi-ui] .wi-check:checked {
+  background-color: ${C.primaryBg};
+  border-color: ${C.primaryBg};
+  background-image: ${CHECK_ICON_ACTIVE};
+}
 [data-wi-ui] .wi-well { background: linear-gradient(165deg var(--wi-oklab), ${C.surface} 0%, ${C.bg2} 100%) !important; }
 [data-wi-ui] .wi-list-grid { grid-auto-flow: row dense; }
 @supports (background: linear-gradient(in oklab, white, black)) { [data-wi-ui] { --wi-oklab: in oklab; } }
@@ -447,10 +478,11 @@
     if (toastEl) toastEl.remove();
     toastEl = h("div", {
       position: "fixed", left: "50%", top: "18px", transform: "translateX(-50%)",
-      background: isError ? C.danger : "rgba(0,0,0,0.78)", color: "#fff",
-      padding: "8px 16px", "border-radius": "8px", "font-size": "13px",
-      "z-index": "2147483647", "max-width": "86vw", "box-shadow": "0 4px 16px rgba(0,0,0,0.25)",
-    }, msg);
+      background: isError ? C.danger : C.primaryBg, color: isError ? "#fff" : C.primaryFg,
+      padding: "6px 14px", "border-radius": "9999px", "font-size": "12px", "font-weight": "500",
+      display: "inline-flex", "align-items": "center", gap: "6px",
+      "z-index": "2147483647", "max-width": "86vw", "box-shadow": C.panelShadow,
+    }, isError ? null : svgIcon("check", 13), msg);
     playAnim(toastEl, "slide");
     document.documentElement.append(toastEl);
     setTimeout(() => { if (toastEl) { toastEl.style.setProperty("opacity", "0"); toastEl.style.setProperty("transition", "opacity .25s ease"); } setTimeout(() => toastEl && toastEl.remove(), 260); }, isError ? 4200 : 2400);
@@ -1696,12 +1728,12 @@
     overlay.style.setProperty("justify-content", right ? "flex-end" : "center");
     overlay.style.setProperty("padding", right ? "0 min(3vw, 16px)" : "0");
     overlay.style.setProperty("box-sizing", "border-box");
-    if (overlay._positionHint) overlay._positionHint.textContent = right ? "靠右悬浮" : "屏幕居中";
+    if (overlay._positionHint) overlay._positionHint.textContent = right ? "弹出位置：靠右侧悬浮" : "弹出位置：屏幕居中";
   }
 
   function bento(...children) {
-    return h("div", { padding: "12px", "border-radius": "18px", background: C.card,
-      border: `1px solid ${C.border}`, "margin-bottom": "12px", "min-width": "0" }, ...children);
+    return h("div", { padding: "14px", "border-radius": "18px", background: C.card,
+      border: `1px solid ${C.border}`, "box-shadow": C.cardShadow, "margin-bottom": "12px", "min-width": "0" }, ...children);
   }
 
   function buildPanel() {
@@ -1717,31 +1749,45 @@
     playAnim(overlay, "fade");
     overlay.addEventListener("click", (e) => { if (e.target === overlay) closePanel(); });
 
-    const tabs = h("div", { display: "flex", gap: "4px", margin: "12px 14px 6px", padding: "4px", background: C.bg2, border: `1px solid ${C.border}`, "border-radius": "9999px", "flex-shrink": "0" });
+    const brand = h("div", { display: "flex", "align-items": "center", gap: "8px", "min-width": "0" },
+      h("div", {
+        width: "24px", height: "24px", "border-radius": "8px",
+        background: C.primaryBg, color: C.primaryFg,
+        display: "flex", "align-items": "center", "justify-content": "center",
+        "font-weight": "700", "font-size": "12px", "box-shadow": C.pillShadow, "flex-shrink": "0",
+      }, "W"),
+      h("span", { "font-weight": "700", "font-size": "14px", "letter-spacing": "-0.01em", color: C.text }, "Webbin"),
+    );
+    const tabs = mkTrack();
+    const header = h("div", {
+      display: "flex", "align-items": "center", "justify-content": "space-between", gap: "8px",
+      padding: "11px 14px 10px", "border-bottom": `1px solid ${C.border}`, "flex-shrink": "0",
+    }, brand, tabs);
     const body = h("div", { flex: "1", overflow: "auto", padding: "14px" });
     const footer = h("div", {
       display: "flex", "justify-content": "space-between", "align-items": "center",
-      padding: "6px 14px", "border-top": `1px solid ${C.border}`,
-      "font-size": "11px", color: C.sub, "flex-shrink": "0",
+      padding: "7px 15px", "border-top": `1px solid ${C.border}`,
+      "font-size": "11.5px", color: C.muted, "flex-shrink": "0",
     });
     const panel = h("div", {
       width: "min(94vw, 540px)", height: "min(84vh, 640px)", "min-width": "0",
       background: C.bg, color: C.text, "border-radius": "22px",
-      border: "1px solid " + C.border,
+      border: "1px solid " + C.borderStrong,
       display: "flex", "flex-direction": "column", overflow: "hidden",
-      "font-size": "14px", "line-height": "1.6",
+      "font-size": "13px", "line-height": "1.55",
       "font-family": "system-ui,-apple-system,'Segoe UI',Roboto,sans-serif",
       "box-shadow": C.panelShadow,
       transition: "opacity .18s ease, transform .18s ease",
-    }, tabs, body, footer);
+    }, header, body, footer);
     playAnim(panel, "pop");
     panel.setAttribute("data-wi-ui", "1");
 
     for (const [key, label] of [["save", "当前页"], ["list", "已保存"], ["chat", "对话"], ["settings", "设置"]]) {
       const b = h("button", {
-        flex: "1", padding: "7px 0", "border-radius": "9999px", background: "none", border: "none",
-        color: C.sub, "font-size": "14px", cursor: "pointer", "border-bottom": "2px solid transparent",
-        transition: "color .15s ease, border-color .15s ease, background .15s ease",
+        padding: "5px 12px", "border-radius": "9999px", background: "transparent", border: "none",
+        color: C.sub, "font-size": "12px", "font-weight": "500", cursor: "pointer",
+        "white-space": "nowrap",
+        transition: "color .15s ease, background .15s ease, box-shadow .15s ease",
       }, label);
       b.addEventListener("mouseenter", () => { if (currentTab !== key) b.style.setProperty("color", C.text); });
       b.addEventListener("mouseleave", () => { if (currentTab !== key) b.style.setProperty("color", C.sub); });
@@ -2052,10 +2098,7 @@
       st.end = initial.end;
     }
 
-    const presetSel = h("select", {
-      flex: "1", "min-width": "130px", padding: "6px 8px", "border-radius": "8px",
-      border: `1px solid ${C.border}`, background: C.bg, color: C.text, "font-size": "12px",
-    },
+    const presetSel = h("select", { display: "none" },
       h("option", { value: "7d" }, "最近 7 天"),
       h("option", { value: "30d" }, "最近 30 天"),
       h("option", { value: "90d" }, "最近 90 天"),
@@ -2063,9 +2106,16 @@
       h("option", { value: "custom" }, "自定义日期"));
     presetSel.value = st.preset;
 
+    const presetTrack = mkTrack();
+    presetTrack.style.setProperty("flex-wrap", "wrap");
+    const presetBtns = {};
+    const paintPresets = () => {
+      for (const [k, b] of Object.entries(presetBtns)) paintSegBtn(b, st.preset === k);
+    };
+
     const dateStyle = {
-      flex: "1", "min-width": "120px", padding: "6px 8px", "border-radius": "8px",
-      border: `1px solid ${C.border}`, background: C.bg, color: C.text, "font-size": "12px",
+      flex: "1", "min-width": "120px", padding: "6px 10px", "border-radius": "10px",
+      border: `1px solid ${C.border}`, background: C.surface, color: C.text, "font-size": "12px",
     };
     const startInput = h("input", dateStyle);
     startInput.type = "date";
@@ -2073,6 +2123,10 @@
     const endInput = h("input", dateStyle);
     endInput.type = "date";
     endInput.value = st.end || initial.end;
+    const customRow = h("div", {
+      display: st.preset === "custom" ? "flex" : "none",
+      gap: "6px", "align-items": "center", "margin-top": "8px", "flex-wrap": "wrap",
+    }, startInput, h("span", { "font-size": "12px", color: C.sub }, "至"), endInput);
 
     // Tab 重建会重新读 st.start/st.end;自定义日期变化时立即同步并落盘
     const persistRange = () => {
@@ -2085,9 +2139,12 @@
     const syncDateState = () => {
       startInput.disabled = st.running || st.checking || st.preset !== "custom";
       endInput.disabled = st.running || st.checking || st.preset !== "custom";
+      customRow.style.setProperty("display", st.preset === "custom" ? "flex" : "none");
+      paintPresets();
     };
-    presetSel.addEventListener("change", () => {
-      st.preset = presetSel.value;
+    const applyPreset = (val) => {
+      st.preset = val;
+      presetSel.value = val;
       if (st.preset !== "custom") {
         const b = rangePresetBounds(st.preset, Date.now());
         if (b) {
@@ -2100,7 +2157,13 @@
       }
       syncDateState();
       scheduleUpEstimate(space.mid);
-    });
+    };
+    for (const [k, label] of [["7d", "最近 7 天"], ["30d", "最近 30 天"], ["90d", "最近 90 天"], ["1y", "最近 1 年"], ["custom", "自定义"]]) {
+      const b = mkSegBtn(label, () => { if (!st.running && !st.checking) applyPreset(k); });
+      presetBtns[k] = b;
+      presetTrack.append(b);
+    }
+    presetSel.addEventListener("change", () => applyPreset(presetSel.value));
     const toCustom = () => {
       st.preset = "custom";
       st.start = startInput.value;
@@ -2119,27 +2182,28 @@
       paintUpBatch();
     });
     stopBtn.style.setProperty("display", "none");
-    const status = h("div", { "font-size": "12px", color: C.sub, "margin-top": "8px", "min-height": "18px" });
-    const est = h("div", { "font-size": "11px", color: C.sub, "margin-top": "6px", "min-height": "14px" });
-    const report = h("div", { "margin-top": "4px", "max-height": "180px", overflow: "auto" });
+    const status = h("div", { "font-size": "12px", color: C.sub, "margin-top": "6px", "min-height": "16px" });
+    const est = h("div", { "font-size": "11.5px", color: C.sub, "margin-top": "2px" });
+    const report = h("div", { "margin-top": "4px", "max-height": "160px", overflow: "auto" });
 
-    const box = h("div", {
-      "margin-top": "14px", padding: "12px", background: C.card,
-      border: `1px solid ${C.border}`, "border-radius": "18px",
+    const well = h("div", {
+      padding: "11px 12px", "border-radius": "14px", background: C.surface, border: `1px solid ${C.border}`,
+      display: "flex", "flex-direction": "column", gap: "8px",
     },
-      h("div", { "font-weight": "600", "font-size": "13px", "margin-bottom": "6px" }, `UP主投稿批量字幕(mid: ${space.mid})`),
-      h("div", { "font-size": "11px", color: C.sub, "margin-bottom": "8px" },
-        "按投稿时间倒序抓取所选范围内的视频字幕,抓到后直接进入收集箱。"),
-      h("div", { display: "flex", gap: "8px", "align-items": "center", "flex-wrap": "wrap" },
-        h("span", { "font-size": "12px", color: C.sub }, "时间范围"), presetSel),
-      h("div", { display: "flex", gap: "6px", "align-items": "center", "margin-top": "6px", "flex-wrap": "wrap" },
-        startInput, h("span", { "font-size": "12px", color: C.sub }, "至"), endInput),
-      est,
-      h("div", { display: "flex", gap: "8px", "margin-top": "8px", "flex-wrap": "wrap" }, btn, stopBtn),
+      h("div", { display: "flex", "align-items": "center", "justify-content": "space-between", gap: "8px", "flex-wrap": "wrap" },
+        h("div", {},
+          h("div", { "font-weight": "600", "font-size": "13px", color: C.text }, `UP主投稿批量字幕(mid: ${space.mid})`),
+          est),
+        h("div", { display: "flex", gap: "6px", "flex-wrap": "wrap" }, btn, stopBtn)),
+      presetSel,
+      presetTrack,
+      customRow,
       status, report,
-      h("div", { "font-size": "11px", color: C.sub, "margin-top": "6px" },
-        `单次最多 ${UP_BATCH_MAX} 个;多P视频只抓第1P;AI 字幕需要浏览器已登录 B 站。`),
+      h("div", { "font-size": "11px", color: C.muted },
+        `单次最多 ${UP_BATCH_MAX} 个 · 多P视频抓第1P · AI 字幕需已登录 B 站`),
     );
+    well.className = "wi-well";
+    const box = bento(well);
     upBatchDom = { box, btn, stopBtn, presetSel, startInput, endInput, status, est, report };
     est.textContent = st.est;
     syncDateState();
@@ -2273,13 +2337,20 @@
         `普通网页提取正文,B站视频抓字幕;重复网址自动去重,单次最多 ${BATCH_SAVE_MAX} 条。`),
       status, report,
     );
-    const arrowHint = h("span", { "font-size": "11px", color: C.sub, "font-weight": "500" }, st.open ? "收起 ▴" : "展开 ▾");
+    const arrowHint = h("span", {
+      padding: "3px 10px", "border-radius": "9999px", background: C.surface, border: `1px solid ${C.border}`,
+      "font-size": "11px", color: C.sub, "font-weight": "500", "flex-shrink": "0",
+    }, st.open ? "收起 ▴" : "展开 ▾");
     const root = h("details", {
-      padding: "10px 14px", background: C.card, border: `1px solid ${C.border}`, "border-radius": "16px",
+      padding: "12px 14px", background: C.card, border: `1px solid ${C.border}`,
+      "border-radius": "18px", "box-shadow": C.cardShadow,
     }, h("summary", {
-      cursor: "pointer", "font-weight": "600", "font-size": "12.5px",
-      display: "flex", "align-items": "center", "justify-content": "space-between",
-    }, h("span", {}, "批量保存多个网址(网页正文 / B站字幕)"), arrowHint), body);
+      cursor: "pointer", display: "flex", "align-items": "center", "justify-content": "space-between", gap: "8px",
+    },
+      h("div", {},
+        h("div", { "font-weight": "600", "font-size": "13px", color: C.text }, "批量保存多个网址(网页正文 / B站字幕)"),
+        h("div", { "font-size": "11.5px", color: C.sub, "margin-top": "2px" }, "支持混排普通网页、B站视频、b23 短链与裸 BV 号，自动并发去重")),
+      arrowHint), body);
     root.open = !!(st.open || st.running || st.checking);
     root.addEventListener("toggle", () => {
       st.open = root.open;
@@ -2368,12 +2439,19 @@
       btn.disabled = false;
     };
 
+    const hostBadge = h("span", {
+      padding: "2px 9px", "border-radius": "9999px", "font-size": "11px", "font-weight": "500",
+      background: C.surface, border: `1px solid ${C.border}`, color: C.sub,
+    }, location.hostname || "Readability 就绪");
+
     if (space) {
       const linkBtn = mkBtn("仅存链接", undefined, false, () => saveLink(linkBtn));
       body.append(
-        h("div", { "font-weight": "600", "font-size": "13.5px" }, "B站 UP 主主页"),
-        h("div", { "margin-top": "4px", "font-size": "12px", color: C.sub },
-          "按时间范围批量抓取该 UP 主的投稿视频字幕;普通网页/B站视频的批量保存也在下方。"),
+        h("div", { display: "flex", "align-items": "center", "justify-content": "space-between", gap: "8px" },
+          h("span", { "font-weight": "600", "font-size": "12.5px", color: C.sub }, "📚 B站 UP 主主页"),
+          hostBadge),
+        h("div", { "margin-top": "6px", "font-size": "12px", color: C.sub },
+          "按时间范围批量抓取该 UP 主的投稿视频字幕；普通网页/B站视频的批量保存也在下方。"),
         h("div", { display: "flex", "align-items": "center", "justify-content": "space-between", gap: "8px", "margin-top": "10px", "flex-wrap": "wrap" },
           h("div", { display: "inline-flex", "align-items": "center", gap: "6px" },
             h("span", { "font-size": "12px", color: C.sub }, "保存到分组"), groupSelect),
@@ -2390,9 +2468,9 @@
         () => runBiliAction(cmtBtn, "保存评论", "⏳ 抓取评论中", (prog) => saveBiliComments(vp, 100, prog)));
       const linkBtn = mkBtn("仅存链接", undefined, false, () => saveLink(linkBtn));
       body.append(
-        h("div", { display: "flex", "align-items": "center", "justify-content": "space-between", "margin-bottom": "6px" },
-          h("span", { "font-weight": "600", "font-size": "12.5px", color: C.sub }, "标题"),
-          h("span", { "font-size": "11px", color: C.muted }, location.hostname)),
+        h("div", { display: "flex", "align-items": "center", "justify-content": "space-between", "margin-bottom": "8px" },
+          h("span", { "font-weight": "600", "font-size": "12px", color: C.sub }, "📺 B站视频字幕 / 评论抓取"),
+          hostBadge),
         titleInput,
         h("div", { display: "flex", "align-items": "center", "justify-content": "space-between", gap: "8px", "margin-top": "10px", "flex-wrap": "wrap" },
           h("div", { display: "inline-flex", "align-items": "center", gap: "6px" },
@@ -2462,9 +2540,9 @@
         : "自动提取网页正文(Readability)并落盘为 Markdown。");
 
     body.append(
-      h("div", { display: "flex", "align-items": "center", "justify-content": "space-between", "margin-bottom": "6px" },
-        h("span", { "font-weight": "600", "font-size": "12.5px", color: C.sub }, "标题"),
-        h("span", { "font-size": "11px", color: C.muted }, location.hostname)),
+      h("div", { display: "flex", "align-items": "center", "justify-content": "space-between", "margin-bottom": "8px" },
+        h("span", { "font-weight": "600", "font-size": "12px", color: C.sub }, "📄 当前网页正文提取"),
+        hostBadge),
       titleInput,
       h("div", { display: "flex", "align-items": "center", "justify-content": "space-between", gap: "8px", "margin-top": "10px", "flex-wrap": "wrap" },
         h("div", { display: "inline-flex", "align-items": "center", gap: "6px" },
@@ -2497,17 +2575,18 @@
 
   function buildListTab(body) {
     const connectionVersion = savedConnectionVersion;
-    // 按需浮现的批量操作栏:0 项选中时隐藏(display:none),不挤占顶部空间;勾选后以毛玻璃胶囊栏吸顶浮现
+    // 底部居中悬浮的药丸批量操作坞(StashDock Batch Action Dock):0 项选中时隐藏,勾选后浮现
     const bar = h("div", {
-      display: "none", position: "sticky", top: "6px", "z-index": "5",
-      background: REDUCE_TRANSPARENCY ? C.surface : rgbaOf(C.surface, 0.92),
-      padding: "7px 10px", margin: "0 0 10px", "border-radius": "16px",
+      display: "none", position: "sticky", bottom: "6px", "z-index": "20",
+      width: "fit-content", "max-width": "100%", margin: "12px auto 0",
+      background: REDUCE_TRANSPARENCY ? C.surface : rgbaOf(C.surface, 0.94),
+      padding: "5px 10px", "border-radius": "9999px",
       border: `1px solid ${C.borderStrong}`, "box-shadow": C.cardShadowHover,
-      "align-items": "center", gap: "6px", "flex-wrap": "wrap",
+      "align-items": "center", "justify-content": "center", gap: "2px", "flex-wrap": "wrap",
     });
     if (!REDUCE_TRANSPARENCY) {
-      bar.style.setProperty("backdrop-filter", "blur(14px)");
-      bar.style.setProperty("-webkit-backdrop-filter", "blur(14px)");
+      bar.style.setProperty("backdrop-filter", "blur(16px)");
+      bar.style.setProperty("-webkit-backdrop-filter", "blur(16px)");
     }
     const reportEl = h("div");
     const listEl = h("div");
@@ -2529,12 +2608,15 @@
     }
     paintViewToggle();
 
-    const loadStatus = h("span", { "font-size": "11px", color: C.muted, "white-space": "nowrap" });
+    const loadStatus = h("div", {
+      display: "none", "font-size": "11px", color: C.muted,
+      padding: "2px 4px 6px", "white-space": "nowrap", overflow: "hidden", "text-overflow": "ellipsis",
+    });
     loadStatus.setAttribute("role", "status");
     loadStatus.setAttribute("aria-live", "polite");
 
-    // Row 1: 胶囊搜索框(带放大镜图标) + Grid/List 分段切换器
-    const controls = h("div", { display: "flex", gap: "8px", "align-items": "center", padding: "10px 0 6px" });
+    // Row 1: 胶囊搜索框(带放大镜图标 + 清空按钮) + Grid/List 分段切换器
+    const controls = h("div", { display: "flex", gap: "8px", "align-items": "center", padding: "12px 0 8px" });
     const searchInput = h("input", {
       width: "100%", border: "none", outline: "none", background: "transparent",
       color: C.text, "font-size": "12.5px", padding: "2px 0",
@@ -2542,12 +2624,27 @@
     searchInput.value = savedListQuery || "";
     searchInput.placeholder = "搜索标题或网站";
     searchInput.setAttribute("aria-label", "搜索标题或网站");
+    const clearSearchBtn = h("button", {
+      display: searchInput.value ? "inline-flex" : "none",
+      "align-items": "center", "justify-content": "center",
+      width: "18px", height: "18px", padding: "0", "border-radius": "9999px",
+      border: "none", background: "transparent", color: C.muted, cursor: "pointer",
+    }, svgIcon("close", 12));
+    clearSearchBtn.type = "button";
+    clearSearchBtn.title = "清空搜索";
+    clearSearchBtn.addEventListener("click", () => {
+      searchInput.value = "";
+      savedListQuery = "";
+      clearSearchBtn.style.setProperty("display", "none");
+      try { GM_setValue("saved_list_query_v1", ""); } catch { /* 忽略 */ }
+      renderList(); renderBar();
+    });
     const searchWrap = h("div", {
       flex: "1", "min-width": "140px", display: "flex", "align-items": "center", gap: "7px",
-      padding: "5px 12px", "border-radius": "9999px", background: C.bg2,
+      padding: "6px 12px", "border-radius": "9999px", background: C.bg2,
       border: `1px solid ${C.border}`,
       transition: "border-color .15s ease, background .15s ease, box-shadow .15s ease",
-    }, h("span", { color: C.muted, display: "inline-flex" }, svgIcon("search", 14)), searchInput);
+    }, h("span", { color: C.muted, display: "inline-flex" }, svgIcon("search", 14)), searchInput, clearSearchBtn);
     searchInput.addEventListener("focus", () => {
       searchWrap.style.setProperty("border-color", C.borderStrong);
       searchWrap.style.setProperty("background", C.surface);
@@ -2560,17 +2657,35 @@
     });
     controls.append(searchWrap, viewToggle);
 
-    // Row 2: 左侧 [全部分组 ▾] [分组管理] [全选] | 右侧 [状态文本] [↻ 刷新]
-    const refreshBtn = mkBtn("刷新", () => refreshItems(true));
-    refreshBtn.prepend ? refreshBtn.prepend(svgIcon("refresh", 12)) : refreshBtn.append(svgIcon("refresh", 12));
-    const groupFilter = h("select", {
-      "min-width": "104px", "max-width": "170px", padding: "5px 26px 5px 12px", "border-radius": "9999px",
-      border: `1px solid ${C.borderStrong}`, background: C.surface, color: C.text, "font-size": "12px",
-    });
+    // Row 2: 左侧横向胶囊分类滑轨 [All 全部 | 默认 | ...] | 右侧 [🏷 管理分组] [↻]
+    const srRefreshText = h("span", {
+      position: "absolute", width: "1px", height: "1px", padding: "0", margin: "-1px",
+      overflow: "hidden", clip: "rect(0, 0, 0, 0)", border: "0",
+    }, "刷新");
+    const refreshBtn = h("button", {
+      width: "30px", height: "30px", padding: "0", "border-radius": "9999px",
+      border: `1px solid ${C.borderStrong}`, background: C.surface, color: C.sub,
+      display: "inline-flex", "align-items": "center", "justify-content": "center",
+      cursor: "pointer", "flex-shrink": "0", position: "relative",
+      transition: "border-color .15s ease, color .15s ease, transform .1s ease",
+    }, svgIcon("refresh", 13), srRefreshText);
+    refreshBtn.type = "button";
+    refreshBtn.title = "刷新列表";
+    refreshBtn.setAttribute("aria-label", "刷新列表");
+    refreshBtn.addEventListener("click", () => refreshItems(true));
+
+    // 保留隐藏 select 维持状态同步与测试兼容,视觉上由横向胶囊滑轨 groupTrack 呈现
+    const groupFilter = h("select", { display: "none" });
     groupFilter.className = "wi-select-pill";
+    const groupTrack = mkTrack();
+    groupTrack.style.setProperty("max-width", "100%");
+    groupTrack.style.setProperty("overflow-x", "auto");
+    const groupPills = {};
+
     const groupManager = h("details", {
-      display: "none", "margin-bottom": "10px", padding: "10px 12px",
+      display: "none", "margin-bottom": "10px", padding: "12px 14px",
       background: C.card, border: `1px solid ${C.border}`, "border-radius": "16px",
+      "box-shadow": C.cardShadow,
     },
       h("summary", { display: "none" }, "管理分组"),
       renderGroupManager((groups) => {
@@ -2581,13 +2696,20 @@
         renderList();
       }),
     );
-    const mgrBtn = mkBtn("分组管理", () => {
+    const mgrBtn = mkBtn("管理分组", () => {
       groupManager.open = !groupManager.open;
       groupManager.style.setProperty("display", groupManager.open ? "block" : "none");
       mgrBtn.style.setProperty("border-color", groupManager.open ? C.primaryBg : C.borderStrong);
     });
     mgrBtn.prepend ? mgrBtn.prepend(svgIcon("tag", 12)) : mgrBtn.append(svgIcon("tag", 12));
-    const selectAllBtn = mkBtn("全选", () => {
+
+    const selectAllBtn = h("button", {
+      padding: "5px 9px", "border-radius": "9999px", border: "none",
+      background: "transparent", color: C.sub, "font-size": "12px", "font-weight": "500",
+      cursor: "pointer", "white-space": "nowrap",
+    }, "全选");
+    selectAllBtn.type = "button";
+    selectAllBtn.addEventListener("click", () => {
       const visible = visibleItems();
       if (!visible.length || batchBusy) return;
       const allChecked = visible.every((it) => selectedIds.has(it.id));
@@ -2598,27 +2720,50 @@
       renderList();
       renderBar();
     });
+
     const filters = h("div", {
-      display: "flex", gap: "6px", "margin-bottom": "8px", "align-items": "center",
+      display: "flex", gap: "8px", "margin-bottom": "10px", "align-items": "center",
       "justify-content": "space-between", "flex-wrap": "wrap",
     },
-      h("div", { display: "flex", gap: "6px", "align-items": "center", "flex-wrap": "wrap" }, groupFilter, mgrBtn, selectAllBtn),
-      h("div", { display: "flex", gap: "6px", "align-items": "center", "margin-left": "auto" }, loadStatus, refreshBtn),
+       h("div", { display: "flex", gap: "6px", "align-items": "center", "min-width": "0", flex: "1" }, groupFilter, groupTrack),
+      h("div", { display: "flex", gap: "6px", "align-items": "center", "margin-left": "auto", "flex-shrink": "0" }, mgrBtn, refreshBtn),
     );
-    body.append(controls, filters, groupManager, bar, reportEl, listEl);
+    body.append(controls, filters, loadStatus, groupManager, reportEl, listEl, bar);
     let items = [];
     let selectedGroup = savedListGroup;
     const barButtons = {};
 
+    function paintGroupPills() {
+      for (const [gid, btn] of Object.entries(groupPills)) {
+        paintSegBtn(btn, gid === selectedGroup);
+      }
+    }
+
     function renderGroupFilter() {
       const keep = selectedGroup;
-      groupFilter.replaceChildren(...[{ id: "all", name: "全部分组" }, ...groupsCache]
-        .map((g) => h("option", { value: g.id }, g.name)));
+      const allGroups = [{ id: "all", name: "全部分组", pillLabel: "All 全部" }, ...groupsCache.map((g) => ({ ...g, pillLabel: g.name }))];
+      groupFilter.replaceChildren(...allGroups.map((g) => h("option", { value: g.id }, g.name)));
       const valid = groupsCache.some((g) => g.id === keep) || keep === "all";
       selectedGroup = !groupsLoaded || valid ? keep : "all";
       savedListGroup = selectedGroup;
       try { GM_setValue("saved_list_group_v1", selectedGroup); } catch { /* 筛选仍可使用 */ }
       groupFilter.value = valid ? selectedGroup : "all";
+
+      for (const k of Object.keys(groupPills)) delete groupPills[k];
+      groupTrack.replaceChildren(...allGroups.map((g) => {
+        const b = mkSegBtn(g.pillLabel, null, () => {
+          selectedGroup = g.id;
+          savedListGroup = selectedGroup;
+          groupFilter.value = g.id;
+          try { GM_setValue("saved_list_group_v1", selectedGroup); } catch { /* 忽略 */ }
+          paintGroupPills();
+          renderList();
+          renderBar();
+        });
+        groupPills[g.id] = b;
+        return b;
+      }));
+      paintGroupPills();
     }
 
     const visibleItems = () => {
@@ -2648,18 +2793,20 @@
 
     function refreshItems(manual = false) {
       refreshBtn.disabled = true;
-      if (manual) refreshBtn.textContent = "刷新中…";
       loadStatus.style.setProperty("color", C.sub);
+      loadStatus.style.setProperty("display", "none");
       loadStatus.textContent = savedItemsCache ? "已显示本地缓存,正在刷新…" : "正在加载最新资料…";
       return gmFetch("GET", "/api/items")
         .then(({ items: remote }) => {
           if (connectionVersion !== savedConnectionVersion) return;
           mergeRemoteItems(remote);
+          loadStatus.style.setProperty("display", "none");
           loadStatus.textContent = "已更新 · " + new Date().toLocaleTimeString("zh-CN", { hour12: false });
         })
         .catch((e) => {
           if (connectionVersion !== savedConnectionVersion) return;
           loadStatus.style.setProperty("color", C.danger);
+          loadStatus.style.setProperty("display", "block");
           loadStatus.textContent = savedItemsCache
             ? "刷新失败,当前显示本地缓存: " + e.message
             : "加载失败: " + e.message;
@@ -2669,7 +2816,7 @@
         })
         .finally(() => {
           refreshBtn.disabled = false;
-          refreshBtn.replaceChildren(svgIcon("refresh", 12), "刷新");
+          refreshBtn.replaceChildren(svgIcon("refresh", 13), srRefreshText);
         });
     }
 
@@ -2677,10 +2824,12 @@
       selectedGroup = groupFilter.value;
       savedListGroup = selectedGroup;
       try { GM_setValue("saved_list_group_v1", selectedGroup); } catch { /* 筛选仍可使用 */ }
+      paintGroupPills();
       renderList(); renderBar();
     });
     searchInput.addEventListener("input", () => {
       savedListQuery = searchInput.value;
+      clearSearchBtn.style.setProperty("display", savedListQuery ? "inline-flex" : "none");
       try { GM_setValue("saved_list_query_v1", savedListQuery); } catch { /* 搜索仍可使用 */ }
       renderList(); renderBar();
     });
@@ -2696,7 +2845,7 @@
         groups.get(f.msg).push(f.title);
       }
       const box = h("div", {
-        margin: "8px 0 0", padding: "8px 10px", "border-radius": "8px",
+        margin: "0 0 10px", padding: "10px 12px", "border-radius": "14px",
         background: C.bg2, border: `1px solid ${C.danger}`, "font-size": "12px",
       });
       const close = h("span", { float: "right", color: C.sub, cursor: "pointer", "font-weight": "400" }, "✕");
@@ -2742,6 +2891,29 @@
       for (const it of visible) listEl.append(renderListItem(it, renderBar));
     };
 
+    function mkDockBtn(label, color, bold, fn) {
+      const b = h("button", {
+        padding: "5px 9px", "border-radius": "9999px", border: "none",
+        background: "transparent", color: color || C.sub,
+        "font-size": "12px", "font-weight": bold ? "600" : "500",
+        cursor: "pointer", display: "inline-flex", "align-items": "center", gap: "4px",
+        "white-space": "nowrap", transition: "background .15s ease, color .15s ease",
+      }, label);
+      b.type = "button";
+      b.addEventListener("mouseenter", () => {
+        if (!b.disabled) {
+          b.style.setProperty("background", C.bg2);
+          if (!color) b.style.setProperty("color", C.text);
+        }
+      });
+      b.addEventListener("mouseleave", () => {
+        b.style.setProperty("background", "transparent");
+        b.style.setProperty("color", color || C.sub);
+      });
+      if (fn) b.addEventListener("click", fn);
+      return b;
+    }
+
     function renderBar() {
       bar.replaceChildren();
       const visible = visibleItems();
@@ -2752,59 +2924,48 @@
       // 0 项选中且无进行中任务时收起批量操作栏,把视觉重心完全留给资料卡片
       const showBar = n > 0 || batchBusy || moveMode;
       bar.style.setProperty("display", showBar ? "flex" : "none");
-      bar.append(h("div", {
-        padding: "3px 9px", "border-radius": "9999px",
-        background: n ? C.primaryBg : C.bg2, color: n ? C.primaryFg : C.sub,
-        "font-size": "11.5px", "font-weight": "600",
-      }, n ? `已选 ${n} 项` : "批量操作"));
-
-      const allBox = mkCheckbox(allChecked);
-      allBox.style.setProperty("margin", "0");
-      allBox.disabled = batchBusy || !visible.length;
-      allBox.addEventListener("change", () => {
-        for (const it of visible) {
-          if (allBox.checked) selectedIds.add(it.id);
-          else selectedIds.delete(it.id);
-        }
-        renderList();
-        renderBar();
-      });
-      bar.append(h("label", {
-        display: "inline-flex", "align-items": "center", gap: "5px",
-        "font-size": "12px", color: C.sub, cursor: allBox.disabled ? "default" : "pointer",
-      }, allBox, "全选"));
+      bar.append(h("span", {
+        padding: "4px 10px", "border-radius": "9999px", "margin-right": "2px",
+        background: C.primaryBg, color: C.primaryFg,
+        "font-size": "11.5px", "font-weight": "600", "white-space": "nowrap",
+      }, `已选 ${n} 项`), selectAllBtn);
 
       // 移动到分组的内联选择态:点「移动到分组」后,批量栏临时变成 [分组选择|确定|取消]
       if (moveMode) {
         const sel = h("select", {
-          flex: "1", "min-width": "110px", padding: "5px 26px 5px 12px", "border-radius": "9999px",
+          "min-width": "104px", padding: "4px 24px 4px 10px", "border-radius": "9999px",
           border: `1px solid ${C.borderStrong}`, background: C.surface, color: C.text, "font-size": "12px",
         });
         sel.className = "wi-select-pill";
         sel.append(h("option", { value: "default" }, "默认"));
         for (const g of groupsCache.filter((x) => !x.builtin)) sel.append(h("option", { value: g.id }, g.name));
-        const okBtn = mkBtn("确定", C.accent, true, () => batchMoveConfirm(sel.value));
-        const cancelBtn = mkBtn("取消", undefined, false, batchMoveCancel);
+        const okBtn = mkDockBtn("确定", C.accent, true, () => batchMoveConfirm(sel.value));
+        const cancelBtn = mkDockBtn("取消", undefined, false, batchMoveCancel);
         okBtn.disabled = !n;
         bar.append(sel, okBtn, cancelBtn);
         return;
       }
 
       const defs = [
-        ["sum", "AI 总结", undefined, true, batchSummarize],
-        ["chat", "就这些聊", C.accent, false, batchChat],
+        ["sum", "AI 总结", undefined, false, batchSummarize],
+        ["chat", "就这些聊", C.accent, true, batchChat],
         ["move", "移动到分组", undefined, false, batchMoveStart],
         ["dl", "下载 .md", undefined, false, batchDownload],
         ["del", "删除", C.danger, false, batchDelete],
-        ["cancel", "取消选择", undefined, false, clearSelection],
       ];
-      for (const [key, label, color, primary, fn] of defs) {
-        const b = mkBtn(label, color, primary, fn);
+      for (const [key, label, color, bold, fn] of defs) {
+        const b = mkDockBtn(label, color, bold, fn);
         b.disabled = batchBusy || n === 0;
         b.style.opacity = b.disabled ? "0.55" : "";
         barButtons[key] = b;
         bar.append(b);
       }
+      const closeDockBtn = mkDockBtn(svgIcon("close", 13), C.muted, false, clearSelection);
+      closeDockBtn.title = "取消选择";
+      closeDockBtn.setAttribute("aria-label", "取消选择");
+      closeDockBtn.disabled = batchBusy || n === 0;
+      barButtons.cancel = closeDockBtn;
+      bar.append(closeDockBtn);
       paintProgress(); // 批量进行中列表 Tab 被重建:进度实时恢复到新按钮
     }
 
@@ -2990,12 +3151,12 @@
     cb.className = "wi-check";
     cb.setAttribute("aria-label", "选择条目");
     cb.checked = !!checked;
-    cb.style.setProperty("width", "22px");
-    cb.style.setProperty("height", "22px");
+    cb.style.setProperty("width", "24px");
+    cb.style.setProperty("height", "24px");
     cb.style.setProperty("accent-color", C.accent);
     cb.style.setProperty("cursor", "pointer");
     cb.style.setProperty("flex-shrink", "0");
-    cb.style.setProperty("margin", "2px 10px 0 0"); // 右侧留白避免与标题重叠,顶端微调与首行居中
+    cb.style.setProperty("margin", "0");
     return cb;
   }
 
@@ -3008,26 +3169,28 @@
     const primaryTag = it.has_summary ? "✨ 已总结" : (isBili ? "📺 字幕" : (it.has_content ? "📄 正文" : "🔗 链接"));
     for (const label of [primaryTag, it.status === "archived" && "✅ 已归档"].filter(Boolean)) {
       badges.append(h("span", {
-        "font-size": "10.5px", "font-weight": "500", padding: "2px 7px", "border-radius": "9999px",
+        "font-size": "11px", "font-weight": "500", padding: "2px 8px", "border-radius": "9999px",
         background: C.surface, border: `1px solid ${C.border}`, color: C.sub,
       }, label));
     }
-    const cb = mkCheckbox(selectedIds.has(it.id));
-    cb.style.setProperty("margin", "0");
+    const checked = selectedIds.has(it.id);
+    const cb = mkCheckbox(checked);
     cb.setAttribute("aria-label", "选择 " + it.title);
     cb.addEventListener("click", (e) => e.stopPropagation());
     const row = h("div", {
       display: "flex", "flex-direction": grid ? "column" : "row",
       "justify-content": "space-between", "align-items": grid ? "stretch" : "center",
-      gap: grid ? "0" : "10px",
-      padding: grid ? "8px" : "9px 12px", "border-radius": grid ? "18px" : "14px", background: C.card,
-      border: `1px solid ${selectedIds.has(it.id) ? C.primaryBg : C.border}`, "box-shadow": C.cardShadow,
+      gap: grid ? "0" : "12px",
+      padding: grid ? "8px" : "10px 12px", "border-radius": grid ? "18px" : "14px", background: C.card,
+      border: `1px solid ${checked ? C.primaryBg : C.border}`,
+      "box-shadow": checked ? "0 0 0 1px " + C.primaryBg : C.cardShadow,
       "min-width": "0", cursor: "pointer",
     });
     row.className = "wi-card";
     cb.addEventListener("change", () => {
       if (cb.checked) selectedIds.add(it.id); else selectedIds.delete(it.id);
       row.style.setProperty("border-color", cb.checked ? C.primaryBg : C.border);
+      row.style.setProperty("box-shadow", cb.checked ? "0 0 0 1px " + C.primaryBg : C.cardShadow);
       onChange();
     });
     const link = h("a", {
@@ -3039,12 +3202,12 @@
     link.addEventListener("click", (e) => e.stopPropagation());
 
     const siteBadge = h("span", {
-      width: grid ? "16px" : "24px", height: grid ? "16px" : "24px",
-      "border-radius": grid ? "5px" : "7px",
+      width: "16px", height: "16px", "border-radius": "5px",
       display: "inline-flex", "align-items": "center", "justify-content": "center", "flex-shrink": "0",
       background: isBili ? "rgba(14,165,233,0.12)" : "rgba(99,102,241,0.12)",
       color: isBili ? "#0ea5e9" : "#6366f1",
-    }, svgIcon(isBili ? "tv" : "file", grid ? 10 : 12));
+    }, svgIcon(isBili ? "tv" : "file", 10));
+    const moreIcon = h("span", { color: C.muted, "flex-shrink": "0", display: "inline-flex" }, svgIcon("more", 15));
 
     if (grid) {
       const cleanSummary = it.summary
@@ -3052,13 +3215,13 @@
         : "";
       const snippetText = cleanSummary || `${groupName} · ${date} · ${it.url || it.site}`;
       const snippetEl = h("div", {
-        "font-size": "11.5px", "line-height": "1.42", color: C.sub,
+        "font-size": "11.5px", "line-height": "1.45", color: C.sub,
         display: "-webkit-box", "-webkit-line-clamp": "2", "-webkit-box-orient": "vertical",
         overflow: "hidden", "overflow-wrap": "anywhere",
       }, snippetText);
       const well = h("div", {
-        padding: "9px 10px", "border-radius": "11px", background: C.surface, border: `1px solid ${C.border}`,
-        "min-height": "72px", display: "flex", "flex-direction": "column", "justify-content": "space-between", gap: "6px",
+        padding: "10px", "border-radius": "12px", background: C.bg2, border: `1px solid ${C.border}`,
+        "min-height": "88px", display: "flex", "flex-direction": "column", "justify-content": "space-between", gap: "6px",
       },
         h("div", { display: "flex", "align-items": "center", "justify-content": "space-between", gap: "6px" }, cb, badges),
         snippetEl,
@@ -3067,17 +3230,16 @@
       row._wellSnippet = snippetEl;
 
       const title = h("div", {
-        "font-weight": "600", "font-size": "12.5px", "line-height": "1.38", color: C.text,
+        "font-weight": "600", "font-size": "13px", "line-height": "1.35", color: C.text,
         display: "-webkit-box", "-webkit-line-clamp": "2", "-webkit-box-orient": "vertical",
         overflow: "hidden", "overflow-wrap": "anywhere", flex: "1",
       }, it.title);
-      const moreIcon = h("span", { color: C.muted, "flex-shrink": "0", "margin-top": "1px", display: "inline-flex" }, svgIcon("more", 14));
       const textBlock = h("div", {
-        padding: "8px 4px 2px", "min-width": "0", flex: "1",
+        padding: "10px 4px 2px", "min-width": "0", flex: "1",
         display: "flex", "flex-direction": "column", "justify-content": "space-between",
       },
         h("div", { display: "flex", "align-items": "flex-start", "justify-content": "space-between", gap: "6px" }, title, moreIcon),
-        h("div", { "margin-top": "7px", display: "flex", "align-items": "center", "justify-content": "space-between", gap: "4px", color: C.sub, "font-size": "11px" },
+        h("div", { "margin-top": "8px", display: "flex", "align-items": "center", "justify-content": "space-between", gap: "4px", color: C.sub, "font-size": "11.5px" },
           h("div", { display: "flex", "align-items": "center", gap: "5px", "min-width": "0", overflow: "hidden" },
             siteBadge,
             h("span", { overflow: "hidden", "text-overflow": "ellipsis", "white-space": "nowrap" }, `${it.site} · ${groupName}`)),
@@ -3091,10 +3253,10 @@
       }, it.title);
       const textBlock = h("div", { "min-width": "0", flex: "1" },
         title,
-        h("div", { "font-size": "11px", color: C.sub, "margin-top": "2px", overflow: "hidden", "text-overflow": "ellipsis", "white-space": "nowrap" },
-          `${it.site} · ${groupName} · ${date}`),
+        h("div", { "font-size": "12px", color: C.sub, "margin-top": "2px", overflow: "hidden", "text-overflow": "ellipsis", "white-space": "nowrap" },
+          `${it.site}  ·  ${primaryTag}${it.status === "archived" ? "  ·  ✅ 已归档" : ""}`),
       );
-      row.append(cb, siteBadge, textBlock, badges, link);
+      row.append(cb, textBlock, moreIcon);
     }
     row.tabIndex = 0;
     row.setAttribute("aria-label", "查看详情: " + it.title);
@@ -3112,18 +3274,57 @@
     // 本地暂存(KV 传播期间)优先,避免单条读取撞上副本延迟而 404
     Promise.resolve(local ? local : gmFetch("GET", "/api/item/" + id))
       .then((it) => {
-        const detail = h("div", { padding: "12px", background: C.card, border: `1px solid ${C.border}`, "border-radius": "18px", "grid-column": "1 / -1", "min-width": "0" });
+        const detail = h("div", {
+          padding: "14px", background: C.card, border: `1px solid ${C.border}`,
+          "border-radius": "18px", "box-shadow": C.cardShadow,
+          "grid-column": "1 / -1", "min-width": "0",
+        });
         playAnim(detail, "slide");
         detail._detail = true;
 
+        const isBili = it.type === "bilibili";
+        const tagText = it.has_summary || it.summary ? "✨ 已总结" : (isBili ? "📺 字幕" : (it.has_content || it.content ? "📄 正文" : "🔗 链接"));
+        const closeBtn = h("button", {
+          width: "26px", height: "26px", padding: "0", "border-radius": "9999px",
+          border: `1px solid ${C.borderStrong}`, background: C.surface, color: C.sub,
+          display: "inline-flex", "align-items": "center", "justify-content": "center",
+          cursor: "pointer", "flex-shrink": "0",
+        }, svgIcon("close", 13));
+        closeBtn.type = "button";
+        closeBtn.title = "关闭详情";
+        closeBtn.addEventListener("click", (e) => { e.stopPropagation(); detail.remove(); });
+
+        const extLink = h("a", {
+          target: "_blank", rel: "noopener noreferrer", color: C.sub,
+          display: "inline-flex", "align-items": "center", gap: "4px",
+          padding: "4px 10px", "border-radius": "9999px",
+          border: `1px solid ${C.borderStrong}`, background: C.surface,
+          "font-size": "11.5px", "text-decoration": "none",
+        }, "原文", svgIcon("external", 11));
+        if (/^https?:\/\//i.test(it.url || "")) extLink.href = it.url;
+
+        const detailHeader = h("div", { display: "flex", "align-items": "flex-start", "justify-content": "space-between", gap: "8px" },
+          h("div", { "min-width": "0", flex: "1" },
+            h("div", { "font-size": "11px", color: C.muted },
+              `${it.site || ""} · ${new Date(it.created_at).toLocaleString("zh-CN", { hour12: false })} · ${tagText}`),
+            h("div", { "font-size": "14px", "font-weight": "600", color: C.text, "margin-top": "2px", "line-height": "1.4" }, it.title)),
+          h("div", { display: "flex", "align-items": "center", gap: "6px", "flex-shrink": "0" }, extLink, closeBtn),
+        );
+
         const summaryBox = h("div", {
-          "white-space": "pre-wrap", "font-size": "13px", "line-height": "1.55", padding: "10px 12px",
-          background: C.bg, border: `1px solid ${C.border}`, "border-radius": "12px", "margin-top": "8px",
+          "white-space": "pre-wrap", "font-size": "12.5px", "line-height": "1.6", color: C.text,
         }, it.summary || "(还没有总结)");
-        summaryBox.className = "wi-well";
+        const summaryWell = h("div", {
+          padding: "10px 12px", background: C.bg2, border: `1px solid ${C.border}`,
+          "border-radius": "12px", "margin-top": "10px",
+        },
+          h("div", { "font-size": "11px", "font-weight": "600", color: C.muted, "margin-bottom": "4px" }, "AI 重点总结"),
+          summaryBox,
+        );
+        summaryWell.className = "wi-well";
         if (it.summary && row._wellSnippet) row._wellSnippet.textContent = it.summary.replace(/\s+/g, " ").trim().slice(0, 90);
 
-        const sumBtn = mkBtn("生成 AI 总结", async () => {
+        const sumBtn = mkBtn("生成 AI 总结", undefined, true, async () => {
           sumBtn.disabled = true;
           sumBtn.style.opacity = "0.55";
           sumBtn.textContent = "⏳ 生成中…";
@@ -3141,6 +3342,15 @@
           sumBtn.style.opacity = "";
           sumBtn.textContent = "重新生成总结";
         });
+        sumBtn.prepend ? sumBtn.prepend(svgIcon("sparkles", 12)) : sumBtn.append(svgIcon("sparkles", 12));
+
+        const chatOneBtn = mkBtn("针对此条对话", undefined, false, () => {
+          resetChatSession();
+          chat.mode = "items";
+          chat.itemIds = [id];
+          saveChatState();
+          switchTab("chat");
+        });
 
         const dlBtn = mkBtn("下载 .md", () => {
           const md = `# ${it.title}\n\n> 来源: ${it.url}\n> 时间: ${new Date(it.created_at).toLocaleString("zh-CN", { hour12: false })}\n\n## AI 总结\n\n${it.summary || "(无)"}\n\n## 正文\n\n${it.content || "(B站视频,正文见归档文件夹)"}\n`;
@@ -3155,13 +3365,18 @@
         });
 
         detail.append(
-          h("div", { display: "flex", gap: "8px", "flex-wrap": "wrap" }, sumBtn, dlBtn, delBtn),
-          summaryBox,
+          detailHeader,
+          h("div", { display: "flex", gap: "6px", "flex-wrap": "wrap", "margin-top": "10px" }, sumBtn, chatOneBtn, dlBtn, delBtn),
+          summaryWell,
           it.content ? h("details", { "margin-top": "8px" },
-            h("summary", { cursor: "pointer", color: C.sub, "font-size": "12px" }, "查看正文"), "") : "",
+            h("summary", { cursor: "pointer", color: C.sub, "font-size": "12px", "font-weight": "500" }, "查看正文内容"), "") : "",
         );
         if (it.content) {
-          const c = h("div", { "white-space": "pre-wrap", "font-size": "13px", "margin-top": "6px", "max-height": "260px", overflow: "auto" }, it.content);
+          const c = h("div", {
+            "white-space": "pre-wrap", "font-size": "12.5px", "line-height": "1.6",
+            "margin-top": "6px", padding: "10px 12px", "border-radius": "12px",
+            background: C.bg2, border: `1px solid ${C.border}`, "max-height": "260px", overflow: "auto",
+          }, it.content);
           detail.lastChild.append(c);
         }
         row.after(detail);
@@ -3251,8 +3466,6 @@
   function buildSettingsTab(body) {
     const { worker, token } = $storage.get();
     const positions = mkTrack();
-    positions.style.setProperty("display", "flex");
-    positions.style.setProperty("margin-top", "10px");
     const positionButtons = {};
     const paintPosition = () => {
       for (const [pos, b] of Object.entries(positionButtons)) {
@@ -3263,14 +3476,19 @@
       const b = mkSegBtn(label, () => {
         $storage.set("panelPos", pos); applyPanelPos(panelEl); paintPosition(); toast("面板位置: " + label);
       });
-      b.style.setProperty("flex", "1");
       positionButtons[pos] = b; positions.append(b);
     }
     paintPosition();
-    body.append(bento(h("div", { "font-weight": "600", "font-size": "13px" }, "界面与弹出位置"), positions));
+    body.append(bento(
+      h("div", { display: "flex", "align-items": "center", "justify-content": "space-between", gap: "10px", "flex-wrap": "wrap" },
+        h("div", {},
+          h("div", { "font-weight": "600", "font-size": "13.5px", color: C.text }, "界面与弹出位置"),
+          h("div", { "font-size": "11.5px", color: C.muted, "margin-top": "2px" }, "深浅色自动跟随系统；可选择面板在网页居中或靠右侧悬浮")),
+        positions),
+    ));
     const field = (labelText, input) =>
-      h("div", { "margin-bottom": "12px" },
-        h("div", { "font-size": "12px", color: C.sub, "margin-bottom": "4px" }, labelText), input);
+      h("div", { "min-width": "0" },
+        h("div", { "font-size": "11.5px", "font-weight": "500", color: C.sub, "margin-bottom": "5px" }, labelText), input);
 
     // autocomplete 属性抑制浏览器把配置项当成登录表单自动填充
     const noAutofill = (input, kind) => {
@@ -3279,7 +3497,7 @@
       return input;
     };
     const workerInput = noAutofill(mkInput(worker, "https://webbin.xxx.workers.dev"));
-    const tokenInput = noAutofill(mkInput(token, "部署 Worker 时在 wrangler.toml 里设置的 TOKEN"));
+    const tokenInput = noAutofill(mkInput(token, "部署 Worker 时设置的 TOKEN"));
     tokenInput.type = "password";
     const apiBaseInput = noAutofill(mkInput("", "https://api.deepseek.com/v1"));
     const apiKeyInput = noAutofill(mkInput("", "留空/保持掩码则不修改"), "new-password");
@@ -3292,9 +3510,10 @@
       const eye = h("button", {
         position: "absolute", right: "8px", top: "50%", transform: "translateY(-50%)",
         cursor: "pointer", "font-size": "14px", "user-select": "none",
-        "line-height": "1", "z-index": "1", opacity: "0.75",
+        "line-height": "1", "z-index": "1", opacity: "0.75", color: C.sub,
         background: "transparent", border: "none", padding: "6px",
       }, svgIcon("eye"));
+      eye.type = "button";
       eye.title = "显示/隐藏";
       eye.setAttribute("aria-label", "显示/隐藏密码");
       eye.setAttribute("aria-pressed", "false");
@@ -3309,15 +3528,29 @@
       return wrap;
     };
     const modelSelect = h("select", {
-      width: "100%", padding: "8px 10px", "border-radius": "8px",
-      border: `1px solid ${C.border}`, background: C.bg2, color: C.text,
-    }, h("option", { value: "" }, "← 点击下方「刷新模型列表」或先手动保存 api_base"));
+      width: "100%", padding: "8px 28px 8px 11px", "border-radius": "10px",
+      border: `1px solid ${C.border}`, background: C.bg2, color: C.text, "font-size": "12.5px",
+    }, h("option", { value: "" }, "点击下方「刷新模型列表」拉取"));
+    modelSelect.className = "wi-select-pill";
     const modelInput = noAutofill(mkInput("", "下拉没有时,手动输入模型名"));
     modelSelect.addEventListener("change", () => { if (modelSelect.value) modelInput.value = modelSelect.value; });
 
-    const saveLocal = mkBtn("保存连接信息", () => {
+    const connBadge = h("span", {
+      "font-size": "11px", "font-weight": "600", padding: "3px 9px", "border-radius": "9999px",
+      background: worker && token ? C.okSoft : C.bg2,
+      color: worker && token ? C.ok : C.muted,
+    }, worker && token ? "● 已配置" : "未配置");
+    const paintConnBadge = (ok) => {
+      const has = workerInput.value.trim() && tokenInput.value.trim();
+      connBadge.textContent = ok ? "● 已连接" : (has ? "● 已配置" : "未配置");
+      connBadge.style.setProperty("background", (ok || has) ? C.okSoft : C.bg2);
+      connBadge.style.setProperty("color", (ok || has) ? C.ok : C.muted);
+    };
+
+    const saveLocal = mkBtn("保存连接信息", undefined, true, () => {
       $storage.set("worker", workerInput.value.trim());
       $storage.set("token", tokenInput.value.trim());
+      paintConnBadge(false);
       toast("已保存连接信息 ✓");
     });
 
@@ -3328,7 +3561,7 @@
       testConn.disabled = true;
       testConn.textContent = "测试中…";
       gmFetch("GET", "/api/items")
-        .then(() => toast("连接成功 ✓ 地址与 Token 均可用"))
+        .then(() => { paintConnBadge(true); toast("连接成功 ✓ 地址与 Token 均可用"); })
         .catch((e) => toast("连接失败: " + e.message, true))
         .finally(() => {
           testConn.disabled = false;
@@ -3394,7 +3627,7 @@
         });
     });
 
-    const saveCfg = mkBtn("保存 LLM 配置到云端", C.accent, true, () => {
+    const saveCfg = mkBtn("保存 LLM 配置到云端", undefined, true, () => {
       $storage.set("worker", workerInput.value.trim());
       $storage.set("token", tokenInput.value.trim());
       saveCfg.disabled = true;
@@ -3433,25 +3666,36 @@
     });
 
     body.append(
-      bento(h("div", { "font-weight": "600", "margin-bottom": "10px" }, "Cloudflare Worker 连接"),
-      field("Worker 地址", workerInput),
-      field("Token", withEye(tokenInput)),
-      h("div", { display: "flex", gap: "8px", "flex-wrap": "wrap", margin: "12px 0" }, saveLocal, testConn, loadCfg),
+      bento(
+        h("div", { display: "flex", "align-items": "center", "justify-content": "space-between", gap: "8px", "margin-bottom": "12px" },
+          h("div", {},
+            h("div", { "font-weight": "600", "font-size": "13.5px", color: C.text }, "Cloudflare Worker 云端连接"),
+            h("div", { "font-size": "11.5px", color: C.muted, "margin-top": "1px" }, "同步与存储网页正文、字幕及自定义分组")),
+          connBadge),
+        h("div", { display: "grid", "grid-template-columns": "repeat(2, minmax(0, 1fr))", gap: "10px" },
+          field("Worker 地址", workerInput),
+          field("鉴权 Token", withEye(tokenInput))),
+        h("div", { display: "flex", gap: "8px", "flex-wrap": "wrap", "margin-top": "12px" }, saveLocal, testConn, loadCfg),
       ),
-      bento(h("div", { "font-weight": "600", "margin-bottom": "10px" }, "LLM 模型配置与分组管理"),
-      field("LLM API Base(OpenAI 兼容)", apiBaseInput),
-      field("API Key(存服务端 KV,前端只回显掩码)", withEye(apiKeyInput)),
-      field("模型(先保存 api_base/key 后可拉列表)", modelSelect),
-      field("或手动输入模型名", modelInput),
-      h("div", { display: "flex", gap: "8px", "flex-wrap": "wrap" }, saveCfg, refreshModels),
-      renderGroupManager()),
+      bento(
+        h("div", { "margin-bottom": "12px" },
+          h("div", { "font-weight": "600", "font-size": "13.5px", color: C.text }, "LLM 模型服务与分组管理"),
+          h("div", { "font-size": "11.5px", color: C.muted, "margin-top": "1px" }, "OpenAI 兼容接口 · 密钥安全存放于服务端 KV，前端仅回显掩码")),
+        h("div", { display: "grid", "grid-template-columns": "repeat(2, minmax(0, 1fr))", gap: "10px" },
+          field("LLM API Base", apiBaseInput),
+          field("API Key", withEye(apiKeyInput))),
+        h("div", { display: "grid", "grid-template-columns": "repeat(2, minmax(0, 1fr))", gap: "10px", "margin-top": "10px" },
+          field("模型列表选择", modelSelect),
+          field("或手动输入模型名", modelInput)),
+        h("div", { display: "flex", gap: "8px", "flex-wrap": "wrap", "margin-top": "12px" }, saveCfg, refreshModels),
+        renderGroupManager()),
     );
   }
 
-  // ---- 分组管理(设置页) ----
+  // ---- 分组管理(设置页 & 已保存页胶囊标签云) ----
   function renderGroupManager(onChanged) {
-    const gmList = h("div", { "font-size": "13px" });
-    const gmName = mkInput("", "新分组名(≤50 字,如「前端文章」)");
+    const gmList = h("div", { display: "flex", "flex-wrap": "wrap", gap: "6px", "margin-bottom": "10px" });
+    const gmName = mkInput("", "新分组名(≤50 字,如「AI 工程」)");
 
     const afterChange = () => loadGroups(true)
       .then((groups) => {
@@ -3473,26 +3717,45 @@
         .then((groups) => {
           gmList.replaceChildren();
           for (const g of groups) {
-            const row = h("div", { display: "flex", "align-items": "center", gap: "8px", padding: "6px 0", "border-bottom": `1px solid ${C.border}` },
-              h("span", { flex: "1" }, g.name + (g.builtin ? "(内置,删除分组后资料自动归入)" : "")));
-            if (!g.builtin) {
-              row.append(
-                mkBtn("改名", undefined, false, () => {
-                  const nn = prompt(`修改分组名「${g.name}」为:`, g.name);
-                  if (!nn || nn.trim() === g.name) return;
-                  gmFetch("POST", "/api/groups", { action: "rename", id: g.id, name: nn.trim() })
-                    .then(afterChange)
-                    .catch((e) => toast(e.message, true));
-                }),
-                mkBtn("删除", C.danger, false, () => {
-                  if (!confirm(`删除分组「${g.name}」?组内资料不删除,将归入默认组。`)) return;
-                  gmFetch("POST", "/api/groups", { action: "delete", id: g.id })
-                    .then(() => { toast("分组已删除"); return afterChange(); })
-                    .catch((e) => toast(e.message, true));
-                }),
-              );
+            if (g.builtin) {
+              gmList.append(h("span", {
+                display: "inline-flex", "align-items": "center", gap: "5px",
+                padding: "4px 11px", "border-radius": "9999px",
+                background: C.bg2, border: `1px solid ${C.border}`,
+                "font-size": "12px", color: C.sub,
+              }, g.name, h("span", { "font-size": "10.5px", color: C.muted }, "· 内置")));
+              continue;
             }
-            gmList.append(row);
+            const renameBtn = h("button", {
+              border: "none", background: "transparent", color: C.sub,
+              "font-size": "11px", padding: "0 2px", cursor: "pointer",
+            }, "改名");
+            renameBtn.type = "button";
+            renameBtn.addEventListener("click", () => {
+              const nn = prompt(`修改分组名「${g.name}」为:`, g.name);
+              if (!nn || nn.trim() === g.name) return;
+              gmFetch("POST", "/api/groups", { action: "rename", id: g.id, name: nn.trim() })
+                .then(afterChange)
+                .catch((e) => toast(e.message, true));
+            });
+            const delBtn = h("button", {
+              border: "none", background: "transparent", color: C.danger,
+              "font-size": "12px", padding: "0 2px", cursor: "pointer", "line-height": "1",
+            }, "×");
+            delBtn.type = "button";
+            delBtn.title = "删除分组";
+            delBtn.addEventListener("click", () => {
+              if (!confirm(`删除分组「${g.name}」?组内资料不删除,将归入默认组。`)) return;
+              gmFetch("POST", "/api/groups", { action: "delete", id: g.id })
+                .then(() => { toast("分组已删除"); return afterChange(); })
+                .catch((e) => toast(e.message, true));
+            });
+            gmList.append(h("span", {
+              display: "inline-flex", "align-items": "center", gap: "6px",
+              padding: "4px 11px", "border-radius": "9999px",
+              background: C.surface, border: `1px solid ${C.borderStrong}`,
+              "font-size": "12px", "font-weight": "500", color: C.text,
+            }, g.name, renameBtn, delBtn));
           }
         })
         .catch((e) => {
@@ -3500,7 +3763,7 @@
         });
     }
 
-    const createBtn = mkBtn("新建分组", undefined, false, () => {
+    const createBtn = mkBtn("+ 新建分组", undefined, false, () => {
       const name = gmName.value.trim();
       if (!name) return toast("请输入分组名", true);
       gmFetch("POST", "/api/groups", { action: "create", name })
@@ -3509,12 +3772,12 @@
     });
 
     renderGroups();
-    return h("div", { "margin-top": "14px" },
-      h("div", { "font-size": "12px", color: C.sub, "margin-bottom": "6px" }, "分组(对话范围与资料整理用)"),
+    return h("div", { "margin-top": "14px", "padding-top": "12px", "border-top": `1px solid ${C.border}` },
+      h("div", { display: "flex", "align-items": "center", "justify-content": "space-between", "margin-bottom": "8px" },
+        h("span", { "font-size": "12px", "font-weight": "600", color: C.text }, "自定义资料分组"),
+        h("span", { "font-size": "11px", color: C.muted }, "删除分组不会删除资料，自动归入默认组")),
       gmList,
-      h("div", { display: "flex", gap: "8px", "margin-top": "8px" }, h("div", { flex: "1" }, gmName), createBtn),
-      h("div", { "font-size": "11px", color: C.sub, "margin-top": "6px" },
-        "资料移动:在「已保存」列表勾选后点「移动到分组」。删除分组不会删除资料。"),
+      h("div", { display: "flex", gap: "8px", "align-items": "center" }, h("div", { flex: "1" }, gmName), createBtn),
     );
   }
 
@@ -3998,7 +4261,7 @@
     if (chatAbort) chatAbort.abort();
   }
 
-  // 工具调用卡片:状态图标(在途转圈/完成 ✓/出错 ⚠) + 名称与参数 + 右侧状态字;
+  // 工具调用卡片:圆形状态徽章(在途转圈/完成 ✓/出错 ⚠) + 名称与参数 + 右侧摘要状态;
   // 结束默认折叠为一行,点击展开详情。详情保留旧状态行文案(📄 读取…),引用收集语义不变
   function buildToolCard(tc, res, titleById) {
     const fn = tc.function || {};
@@ -4007,64 +4270,74 @@
     const detail = [];
     try {
       const a = JSON.parse(fn.arguments || "{}");
-      if (a.query) label += ":" + a.query;
+      if (a.query) label += `("${a.query}")`;
       if (a.item_id) { // 引用显示条目标题而非裸 ID;工具结果→索引都没有才退回 ID
         const t = titleById.get(a.item_id)
           || (kbMeta ? (kbMeta.items.find((it) => it.id === a.item_id) || {}).title : "")
           || a.item_id;
-        label += ":" + (t.length > 18 ? t.slice(0, 18) + "…" : t);
+        label += ` · ${t.length > 22 ? t.slice(0, 22) + "…" : t}`;
         detail.push("条目: " + t);
       }
       if (a.cursor) detail.push("分段游标: " + a.cursor);
     } catch { /* 展示用,解析失败就显示原名 */ }
-    let icon = "—", iconColor = C.sub, stateText = "未完成";
-    if (!res && chat.running) { icon = "◐"; iconColor = C.accent; stateText = "运行中"; }
+    let icon = "—", iconColor = C.sub, iconBg = C.bg2, stateText = "未完成";
+    if (!res && chat.running) { icon = "◐"; iconColor = C.accent; iconBg = C.accentSoft; stateText = "运行中"; }
     else if (res) {
       let r = {};
       try { r = JSON.parse(res.content); } catch { /* 容错展示 */ }
       if (r && r.error) {
-        icon = "⚠"; iconColor = C.danger; stateText = "出错";
+        icon = "⚠"; iconColor = C.danger; iconBg = C.dangerSoft; stateText = "出错";
         detail.push("⚠ " + r.error);
       } else {
-        icon = "✓"; iconColor = C.ok; stateText = "完成";
+        icon = "✓"; iconColor = C.ok; iconBg = C.okSoft; stateText = "完成";
         const n = (Array.isArray(r.items) ? r.items.length : 0) + (Array.isArray(r.hits) ? r.hits.length : 0);
-        if (n) detail.push("返回 " + n + " 条");
+        if (n) { detail.push("返回 " + n + " 条"); stateText = `返回 ${n} 条`; }
         if (r && r.id) { // 旧状态行文案原样保留
           const title = r.title ? "《" + String(r.title).slice(0, 40) + "》" : "";
           detail.push("📄 读取" + title + (r.truncated ? "(已截断)" : "") + (r.total_chars ? " 共" + r.total_chars + "字" : ""));
+          if (r.total_chars) stateText = `读取 ${r.total_chars} 字`;
         }
         if (r && r.note) detail.push("ℹ " + r.note);
       }
     }
-    const iconEl = h("span", { "flex-shrink": "0", width: "14px", "text-align": "center", color: iconColor, "font-size": "11px" }, icon);
+    const isExpanded = res && expandedCalls.has(tc.id);
+    const iconEl = h("span", {
+      "flex-shrink": "0", width: "20px", height: "20px", "border-radius": "9999px",
+      display: "inline-flex", "align-items": "center", "justify-content": "center",
+      background: iconBg, color: iconColor, "font-size": "11px", "font-weight": "700",
+    }, icon);
     if (!res && chat.running && ANIM.spin) iconEl.setAttribute("data-wi-anim", "spin"); // 在途转圈
-    const head = h("div", { display: "flex", "align-items": "center", gap: "6px" },
+    const rightEl = h("span", { "flex-shrink": "0", "font-size": "11px", color: C.muted },
+      res ? `${stateText} ${isExpanded ? "▴" : "▾"}` : stateText);
+    const head = h("div", { display: "flex", "align-items": "center", gap: "8px" },
       iconEl,
-      h("span", { flex: "1", "min-width": "0", overflow: "hidden", "text-overflow": "ellipsis", "white-space": "nowrap" }, label),
-      h("span", { "flex-shrink": "0", "font-size": "10px", color: C.sub }, stateText));
+      h("span", { flex: "1", "min-width": "0", overflow: "hidden", "text-overflow": "ellipsis", "white-space": "nowrap", "font-weight": "600", color: C.text }, label),
+      rightEl);
     const card = h("div", {
-      "max-width": "94%", margin: "4px 0", padding: "6px 9px",
+      "max-width": "94%", margin: "4px 0", padding: "8px 11px",
       "border-radius": "14px", background: C.card, border: "1px solid " + C.border,
-      "font-size": "12px", cursor: res ? "pointer" : "default",
+      "box-shadow": C.cardShadow, "font-size": "12px", cursor: res ? "pointer" : "default",
       transition: "border-color .15s ease",
     }, head);
     card.title = res ? "点击展开/收起详情" : name;
-    card.addEventListener("mouseenter", () => { if (res) card.style.setProperty("border-color", C.accentRing); });
+    card.addEventListener("mouseenter", () => { if (res) card.style.setProperty("border-color", C.borderStrong); });
     card.addEventListener("mouseleave", () => card.style.setProperty("border-color", C.border));
     const detailBox = h("div", {
-      "margin-top": "5px", padding: "5px 8px", background: C.surface,
-      "border-radius": "10px", "font-size": "11px", color: C.sub,
+      "margin-top": "7px", padding: "7px 10px", background: C.bg2,
+      border: `1px solid ${C.border}`, "border-radius": "10px", "font-size": "11.5px", color: C.sub,
       "white-space": "pre-wrap", "word-break": "break-all", display: "none",
     });
+    detailBox.className = "wi-well";
     for (const line of detail) detailBox.append(h("div", { "margin-top": "2px" }, line));
     card.append(detailBox);
     if (res) {
       // 展开状态存 expandedCalls(按 tool_call id):全量重绘后保持
-      detailBox.style.display = expandedCalls.has(tc.id) ? "block" : "none";
+      detailBox.style.display = isExpanded ? "block" : "none";
       card.addEventListener("click", () => {
         const open = expandedCalls.has(tc.id);
         if (open) expandedCalls.delete(tc.id); else expandedCalls.add(tc.id);
         detailBox.style.display = open ? "none" : "block";
+        rightEl.textContent = `${stateText} ${open ? "▾" : "▴"}`;
         if (!open) playAnim(detailBox, "fade");
       });
     }
@@ -4078,15 +4351,26 @@
       if (!chatDom || !chatDom.msgs.isConnected) return;
       const { msgs, status, sendBtn, input, composer } = chatDom;
       const wasNear = chatNearBottom(); // 重绘前判断贴底:贴底才自动跟随,上翻阅读不被拽走
-      // 发送/停止合一:空闲 ➤ 发送,运行中 ■ 停止
-      sendBtn.textContent = chat.running ? "■" : "➤";
+      // 发送/停止合一:空闲纸飞机图标(含无障碍 ➤ 文本)发送,运行中 ■ 停止
+      if (chat.running) {
+        sendBtn.replaceChildren("■");
+      } else {
+        sendBtn.replaceChildren(
+          svgIcon("send", 13),
+          h("span", {
+            position: "absolute", width: "1px", height: "1px", padding: "0", margin: "-1px",
+            overflow: "hidden", clip: "rect(0, 0, 0, 0)", border: "0",
+          }, "➤"),
+        );
+      }
       sendBtn.style.setProperty("background", chat.running ? C.danger : C.primaryBg);
       sendBtn.style.setProperty("color", chat.running ? "#fff" : C.primaryFg);
       sendBtn.title = chat.running ? "停止" : "发送";
       sendBtn.style.setProperty("opacity", !chat.running && !input.value.trim() ? "0.45" : "1"); // 空输入降级
       if (historyBtnEl && historyBtnEl.isConnected) {
         const n = loadChatHistory().length;
-        historyBtnEl.textContent = chat.view === "history" ? "返回对话" : (n ? `历史(${n})` : "历史");
+        const label = chat.view === "history" ? "返回对话" : (n ? `历史(${n})` : "历史");
+        historyBtnEl.replaceChildren(svgIcon("history", 12), label);
       }
       if (chat.view === "history") {
         composer.style.display = "none";
@@ -4121,10 +4405,10 @@
         if (m.role === "system") continue;
         if (m.role === "user") {
           const bubble = h("div", {
-            "max-width": "88%", "margin-left": "auto", "margin-bottom": "8px",
-            padding: "8px 11px", "border-radius": "18px 18px 6px 18px", "box-shadow": C.pillShadow, "white-space": "pre-wrap",
+            "max-width": "84%", "margin-left": "auto", "margin-bottom": "8px",
+            padding: "10px 14px", "border-radius": "18px 18px 6px 18px", "box-shadow": C.pillShadow, "white-space": "pre-wrap",
             "font-size": "13px", background: C.primaryBg, color: C.primaryFg,
-            "line-height": "1.6", "word-break": "break-word",
+            "line-height": "1.55", "word-break": "break-word",
           }, m.content);
           markAnim(bubble, m, "slide-up");
           msgs.append(bubble);
@@ -4144,10 +4428,10 @@
           const shown = isReveal ? revealState.text.slice(0, revealState.pos) : m.content;
           const textNode = document.createTextNode(shown);
           const wrap = h("div", {
-            "max-width": "94%", "margin-bottom": "10px", padding: "8px 11px",
-            "border-radius": "6px 18px 18px 18px", "box-shadow": C.cardShadow, "white-space": "pre-wrap", "font-size": "13px",
-            background: C.surface, color: C.text, border: "1px solid " + C.border,
-            "line-height": "1.6", "word-break": "break-word",
+            "max-width": "94%", "margin-bottom": "10px", padding: "12px 14px",
+            "border-radius": "18px", "box-shadow": C.cardShadow, "white-space": "pre-wrap", "font-size": "13px",
+            background: C.card, color: C.text, border: "1px solid " + C.border,
+            "line-height": "1.65", "word-break": "break-word",
           }, textNode);
           if (isReveal) { // 打字机:占位光标逐字放出;气泡文本节点直接持有,tick 局部更新不重绘
             const caret = document.createElement("span");
@@ -4157,11 +4441,19 @@
             if (!revealState.started) { revealState.started = true; revealTimer = setTimeout(revealTick, 24); }
           }
           if (refs.length) {
-            // 引用锚点直接持有元素引用构建,不用 lastChild 回找(文本节点上没有 querySelector,曾致渲染中断)
-            const refBox = h("div", { "margin-top": "6px", "font-size": "11px", color: C.sub }, "来源:");
+            // 底部横向引用胶囊条(Citation Bar)
+            const refBox = h("div", {
+              "margin-top": "10px", "padding-top": "8px", "border-top": `1px solid ${C.border}`,
+              display: "flex", "align-items": "center", gap: "6px", "flex-wrap": "wrap",
+            }, h("span", { "font-size": "11px", color: C.muted }, "引用来源："));
             for (const r of refs) {
-              const a = h("a", { color: C.accent, cursor: "pointer", "font-size": "11px", "word-break": "break-all",
-                display: "inline-block", padding: "3px 8px", "border-radius": "9999px", background: C.bg2, border: `1px solid ${C.border}` }, r.title);
+              const a = h("a", {
+                color: C.sub, cursor: "pointer", "font-size": "11px", "text-decoration": "none",
+                display: "inline-flex", "align-items": "center", gap: "4px",
+                padding: "3px 9px", "border-radius": "9999px",
+                background: C.bg2, border: `1px solid ${C.border}`,
+                "max-width": "240px", overflow: "hidden", "text-overflow": "ellipsis", "white-space": "nowrap",
+              }, r.title, svgIcon("external", 10));
               if (/^https?:\/\//i.test(r.url || "")) { // 只放行 http(s),防 javascript: 等 scheme
                 a.href = r.url;
                 a.target = "_blank";
@@ -4170,7 +4462,7 @@
               } else {
                 a.style.setProperty("cursor", "default");
               }
-              refBox.append(h("div", { "margin-top": "2px" }, a));
+              refBox.append(a);
             }
             wrap.append(refBox);
             refs = [];
@@ -4199,9 +4491,13 @@
           display: "flex", "flex-direction": "column", "align-items": "center",
           gap: "6px", padding: "48px 20px 24px", "text-align": "center", color: C.sub, "font-size": "12px",
         },
-          h("div", { "font-size": "34px", opacity: "0.9" }, "💬"),
+          h("div", {
+            width: "44px", height: "44px", "border-radius": "14px",
+            background: C.bg2, border: `1px solid ${C.border}`, color: C.text,
+            display: "inline-flex", "align-items": "center", "justify-content": "center", "margin-bottom": "4px",
+          }, svgIcon("sparkles", 20)),
           h("div", { "font-size": "15px", "font-weight": "600", color: C.text }, "向知识库提问"),
-          h("div", {}, "助手会先搜索、再按需读取资料原文作答;先在下方选好范围"));
+          h("div", { color: C.muted }, "助手会先搜索、再按需读取资料原文作答；在下方胶囊选择范围与模型"));
         playAnim(hero, "fade");
         msgs.append(hero);
       }
@@ -4222,24 +4518,25 @@
     status.textContent = list.length
       ? "点任意会话即可载入并继续追问"
       : "还没有历史会话。开始新会话时,上一段对话会自动存入这里。";
-    const page = h("div", { padding: "2px 10px 8px" });
+    const page = h("div", { padding: "2px 4px 8px" });
     page.append(mkBtn("← 返回当前对话", undefined, false, () => { chat.view = "chat"; renderChat(); }));
     for (const s of list) {
       const card = h("div", {
         display: "flex", "align-items": "center", gap: "10px",
-        padding: "10px 12px", "margin-top": "8px",
-        background: C.bg2, border: `1px solid ${C.border}`, "border-radius": "10px",
+        padding: "12px 14px", "margin-top": "8px",
+        background: C.card, border: `1px solid ${C.border}`, "border-radius": "16px",
+        "box-shadow": C.cardShadow,
         cursor: "pointer", transition: "border-color .15s ease, transform .15s ease, box-shadow .15s ease",
       });
       card.addEventListener("mouseenter", () => {
-        card.style.setProperty("border-color", C.accent);
+        card.style.setProperty("border-color", C.borderStrong);
         card.style.setProperty("transform", "translateY(-1px)");
-        card.style.setProperty("box-shadow", "0 4px 14px rgba(0,0,0,0.18)");
+        card.style.setProperty("box-shadow", C.cardShadowHover);
       });
       card.addEventListener("mouseleave", () => {
         card.style.setProperty("border-color", C.border);
         card.style.setProperty("transform", "");
-        card.style.setProperty("box-shadow", "");
+        card.style.setProperty("box-shadow", C.cardShadow);
       });
       playAnim(card, "fade");
       card.addEventListener("click", () => {
@@ -4280,7 +4577,7 @@
           armTimer = setTimeout(() => { // 3 秒不确认自动还原,误触即失效
             armed = false;
             del.textContent = "删除";
-            del.style.setProperty("background", "transparent");
+            del.style.setProperty("background", C.surface);
             del.style.setProperty("color", C.danger);
           }, 3000);
           return;
@@ -4306,76 +4603,89 @@
   }
 
   function buildChatTab(body) {
-    // 左右 12px 留白:顶栏/消息/输入区不再贴面板边
-    const root = h("div", { height: "100%", "box-sizing": "border-box", display: "flex", "flex-direction": "column", padding: "0 12px 12px" });
+    // 左右 14px 留白:顶栏/消息/输入区与其它 Tab 保持视觉对齐
+    const root = h("div", { height: "100%", "box-sizing": "border-box", display: "flex", "flex-direction": "column", padding: "0 14px 12px" });
     body.append(root);
 
-    // ---- 顶栏:会话操作(模型选择已移至底部输入区) ----
-    const topRow = h("div", { display: "flex", gap: "6px", "align-items": "center", "flex-wrap": "wrap", "flex-shrink": "0", padding: "8px 0" });
+    // ---- 顶栏:左侧会话胶囊按钮 + 右侧当前范围摘要 ----
+    const topRow = h("div", {
+      display: "flex", gap: "6px", "align-items": "center", "justify-content": "space-between",
+      "flex-wrap": "wrap", "flex-shrink": "0", padding: "10px 0 6px",
+    });
+    const scopeHint = h("span", {
+      "font-size": "11px", color: C.muted, "margin-left": "auto",
+      overflow: "hidden", "text-overflow": "ellipsis", "white-space": "nowrap", "max-width": "220px",
+    });
 
     function renderTop() {
       topRow.replaceChildren();
-      const mini = (label, fn, tip) => {
+      const mini = (iconName, label, fn, tip) => {
         const b = h("button", {
-          padding: "5px 12px", "border-radius": "9999px", cursor: "pointer", "font-size": "12px",
+          padding: "5px 11px", "border-radius": "9999px", cursor: "pointer", "font-size": "12px", "font-weight": "500",
+          display: "inline-flex", "align-items": "center", gap: "5px",
           border: "1px solid " + C.borderStrong, background: C.surface, color: C.text,
+          "box-shadow": C.pillShadow,
           transition: "background .15s ease, border-color .15s ease, transform .12s ease",
-        }, label);
+        }, iconName ? svgIcon(iconName, 12) : null, label);
+        b.type = "button";
         b.title = tip || label;
         b.addEventListener("mouseenter", () => b.style.setProperty("background", C.bg2));
-        b.addEventListener("mouseleave", () => b.style.setProperty("background", "transparent"));
+        b.addEventListener("mouseleave", () => b.style.setProperty("background", C.surface));
         b.addEventListener("mousedown", () => b.style.setProperty("transform", "scale(.96)"));
         b.addEventListener("mouseup", () => b.style.setProperty("transform", ""));
         b.addEventListener("mouseleave", () => b.style.removeProperty("transform"));
         b.addEventListener("click", fn);
         return b;
       };
-      historyBtnEl = mini("历史", () => {
+      historyBtnEl = mini("history", "历史", () => {
         chat.view = chat.view === "history" ? "chat" : "history";
         renderChat();
       }, "查看以前的对话,可继续");
-      topBtns.new = mini("新会话", onNewSession, "结束当前对话(自动存入历史)");
-      topBtns.reload = mini("⟳ 索引", onReloadIndex, "重新拉取资料索引:跨设备新增/修改/删组后用它同步");
-      topRow.append(topBtns.new, historyBtnEl, topBtns.reload);
+      topBtns.new = mini("plus", "新会话", onNewSession, "结束当前对话(自动存入历史)");
+      topBtns.reload = mini("refresh", "索引", onReloadIndex, "重新拉取资料索引:跨设备新增/修改/删组后用它同步");
+      topRow.append(h("div", { display: "flex", gap: "6px", "align-items": "center", "flex-wrap": "wrap" },
+        topBtns.new, historyBtnEl, topBtns.reload), scopeHint);
       updateModelBtn(); // 模型控件在底部输入区,顶栏只负责同步它的选中值与列表
     }
 
-    // ---- 范围/模型选择:三个自绘多选下拉(ZCode 风格),按钮在输入框深色底行,面板锚定输入框横跨宽度、悬在底行上方 ----
+    // ---- 范围/模型选择:三个胶囊弹出选择器(StashDock Pill Composer),面板锚定输入框悬在上方 ----
     let openDrop = null; // "groups" | "items" | "model" | null
     const drops = {};    // key → { btn, label, panel }
     const mkChip = (text, on, onClick) => {
       const c = h("button", {
-        padding: "4px 10px", "border-radius": "14px", cursor: "pointer", "font-size": "12px",
-        border: "1px solid " + (on ? C.accent : C.border),
-        background: on ? C.accent : "transparent", color: on ? "#fff" : C.text,
+        padding: "4px 11px", "border-radius": "9999px", cursor: "pointer", "font-size": "12px", "font-weight": on ? "600" : "500",
+        border: "1px solid " + (on ? "transparent" : C.borderStrong),
+        background: on ? C.primaryBg : C.surface, color: on ? C.primaryFg : C.text,
         transition: "background .15s ease, color .15s ease, border-color .15s ease, transform .12s ease",
       }, text);
+      c.type = "button";
       c.addEventListener("mouseenter", () => { if (!on) c.style.setProperty("background", C.bg2); });
-      c.addEventListener("mouseleave", () => { if (!on) c.style.setProperty("background", "transparent"); });
+      c.addEventListener("mouseleave", () => { if (!on) c.style.setProperty("background", C.surface); });
       c.addEventListener("mousedown", () => c.style.setProperty("transform", "scale(.95)"));
       c.addEventListener("mouseup", () => c.style.setProperty("transform", ""));
       c.addEventListener("mouseleave", () => c.style.removeProperty("transform"));
       c.addEventListener("click", onClick);
       return c;
     };
-    const mkDrop = (key, title) => {
+    const mkDrop = (key, iconName, title) => {
       const label = h("span", { overflow: "hidden", "text-overflow": "ellipsis", "white-space": "nowrap" });
       const btn = h("button", {
-        display: "inline-flex", "align-items": "center", gap: "5px",
+        display: "inline-flex", "align-items": "center", gap: "4px",
         "max-width": "42%", "min-width": "0", overflow: "hidden",
-        padding: "6px 8px", "border-radius": "8px", cursor: "pointer", "font-size": "12px",
-        border: "1px solid " + C.border, background: C.surface, color: C.sub,
-      }, label, h("span", { "flex-shrink": "0", "font-size": "10px" }, "▼"));
+        padding: "4px 10px", "border-radius": "9999px", cursor: "pointer", "font-size": "11.5px", "font-weight": "500",
+        border: "1px solid " + C.borderStrong, background: C.surface, color: C.sub,
+        "box-shadow": C.pillShadow,
+      }, svgIcon(iconName, 11), label, svgIcon("chevDown", 11));
+      btn.type = "button";
       btn.title = title;
-      // 面板锚定整个输入框(composer 设 relative):横跨输入框宽度、悬在底行上方,
-      // 不再按小按钮定位——按按钮定位在窄屏会跑出面板外(0.8.10 资料面板跳到屏幕左边的根因)
+      // 面板锚定整个输入框(composer 设 relative):横跨输入框宽度、悬在底行上方
       const panel = h("div", {
-        position: "absolute", left: "10px", right: "10px", bottom: "50px",
-        background: REDUCE_TRANSPARENCY ? C.bg : rgbaOf(C.bg, 0.92),
-        "backdrop-filter": REDUCE_TRANSPARENCY ? "" : "blur(12px)",
-        border: "1px solid " + C.border, "border-radius": "16px",
-        "box-shadow": C.panelShadow, padding: "10px",
-        "max-height": "min(430px, 55vh)", overflow: "auto",
+        position: "absolute", left: "8px", right: "8px", bottom: "calc(100% + 8px)",
+        background: REDUCE_TRANSPARENCY ? C.surface : rgbaOf(C.surface, 0.96),
+        "backdrop-filter": REDUCE_TRANSPARENCY ? "" : "blur(16px)",
+        border: "1px solid " + C.borderStrong, "border-radius": "16px",
+        "box-shadow": C.panelShadow, padding: "12px",
+        "max-height": "min(400px, 52vh)", overflow: "auto",
         "z-index": "30", display: "none",
       });
       btn.addEventListener("click", (e) => { e.stopPropagation(); toggleDrop(key); });
@@ -4410,7 +4720,7 @@
       panel.replaceChildren();
       if (key === "groups") {
         const gl = [{ id: "default", name: "默认" }].concat(chat.kbGroups || []);
-        panel.append(h("div", { "font-size": "11px", color: C.sub, "margin-bottom": "8px" }, "勾选参与对话的分组,可多选"));
+        panel.append(h("div", { "font-size": "11px", color: C.sub, "margin-bottom": "8px", "font-weight": "600" }, "勾选参与对话的分组(可多选)"));
         const row = h("div", { display: "flex", gap: "6px", "flex-wrap": "wrap" });
         const allOn = chat.groups.length && chat.groups.length === gl.length;
         row.append(mkChip("全选", allOn, () => {
@@ -4429,14 +4739,15 @@
         panel.append(row);
         return;
       }
-      // 模型选择:与分组/资料一致的自绘下拉,替代原生 select(样式不可控、与整体风格脱节)
+      // 模型选择:与分组/资料一致的自绘下拉
       if (key === "model") {
         const models = GM_getValue("models_cache", []);
         const mkRow = (value, text) => {
           const on = (chat.model || "") === value;
           const row = h("div", {
             display: "flex", "align-items": "center", gap: "8px", padding: "7px 8px",
-            "border-radius": "8px", cursor: "pointer", "font-size": "12px",
+            "border-radius": "10px", cursor: "pointer", "font-size": "12px",
+            "font-weight": on ? "600" : "400",
             color: on ? C.accent : C.text,
           },
             h("span", { "flex-shrink": "0", width: "14px", "text-align": "center" }, on ? "✓" : ""),
@@ -4462,8 +4773,8 @@
         return;
       }
       // 资料多选:直接在面板里点选条目,搜索过滤;面板最多渲染前 200 行防大库卡顿
-      panel.append(h("div", { "font-size": "11px", color: C.sub, "margin-bottom": "8px" },
-        "点选要对话的资料;也可在「已保存」列表勾选后点「就这些聊」"));
+      panel.append(h("div", { "font-size": "11px", color: C.sub, "margin-bottom": "8px", "font-weight": "600" },
+        "点选要对话的资料；也可在「已保存」列表勾选后点「就这些聊」"));
       // 已选条目固定显示在顶部(200 行窗口外/被搜索过滤掉的也能看到并反选)
       if (chat.itemIds.length) {
         const selRow = h("div", { display: "flex", gap: "6px", "flex-wrap": "wrap", "margin-bottom": "8px" });
@@ -4472,11 +4783,12 @@
           const name = (meta && meta.title) || (String(id).length > 12 ? String(id).slice(0, 12) + "…" : String(id));
           const chip = h("button", {
             display: "inline-flex", "align-items": "center", gap: "4px", "max-width": "100%", "min-width": "0",
-            padding: "3px 8px", "border-radius": "12px", cursor: "pointer", "font-size": "11px",
-            border: "1px solid " + C.accent, background: "transparent", color: C.accent,
+            padding: "3px 9px", "border-radius": "9999px", cursor: "pointer", "font-size": "11px",
+            border: "1px solid " + C.accent, background: C.accentSoft, color: C.accent,
           },
             h("span", { overflow: "hidden", "text-overflow": "ellipsis", "white-space": "nowrap" }, name),
             h("span", { "flex-shrink": "0" }, "×"));
+          chip.type = "button";
           chip.title = "取消选择:" + name;
           chip.addEventListener("click", () => {
             chat.itemIds = chat.itemIds.filter((x) => x !== id);
@@ -4541,10 +4853,16 @@
     function renderScope() {
       const gl = [{ id: "default", name: "默认" }].concat(chat.kbGroups || []);
       const names = gl.filter((g) => chat.groups.includes(g.id)).map((g) => g.name);
-      drops.groups.label.textContent = "分组:" + (names.length ? (names.length > 2 ? names.slice(0, 2).join("+") + "…" : names.join("+")) : "未选");
-      drops.groups.btn.style.setProperty("color", chat.mode === "groups" ? C.accent : C.sub);
-      drops.items.label.textContent = "资料:" + (chat.itemIds.length ? chat.itemIds.length + " 条" : "未选");
-      drops.items.btn.style.setProperty("color", chat.mode === "items" ? C.accent : C.sub);
+      const groupSummary = names.length ? (names.length > 2 ? names.slice(0, 2).join("+") + "…" : names.join("+")) : "未选";
+      drops.groups.label.textContent = "分组: " + groupSummary;
+      drops.groups.btn.style.setProperty("color", chat.mode === "groups" ? C.text : C.sub);
+      drops.groups.btn.style.setProperty("border-color", chat.mode === "groups" ? C.primaryBg : C.borderStrong);
+      drops.items.label.textContent = "资料: " + (chat.itemIds.length ? chat.itemIds.length + " 条" : "未选");
+      drops.items.btn.style.setProperty("color", chat.mode === "items" ? C.text : C.sub);
+      drops.items.btn.style.setProperty("border-color", chat.mode === "items" ? C.primaryBg : C.borderStrong);
+      scopeHint.textContent = chat.mode === "items"
+        ? `范围：已选 ${chat.itemIds.length} 条资料`
+        : `范围：${groupSummary}`;
     }
 
     function refreshGroups() {
@@ -4561,14 +4879,14 @@
     const msgs = h("div", { flex: "1", overflow: "auto", padding: "6px 2px", "min-height": "0" });
     const status = h("div", { "font-size": "11px", color: C.sub, padding: "0 2px 4px", "flex-shrink": "0" });
 
-    // ---- 输入区(ZCode 风格:深色圆角容器,上输入,下左侧范围下拉/右侧模型与发送) ----
+    // ---- 底部胶囊输入岛(StashDock Pill Composer Island) ----
     const input = h("textarea", {
-      width: "100%", "box-sizing": "border-box", padding: "8px 8px 2px",
+      width: "100%", "box-sizing": "border-box", padding: "4px 4px 2px",
       border: "none", outline: "none", background: "transparent", color: C.text,
       "font-size": "13px", resize: "none", "font-family": "inherit", "line-height": "1.5",
     });
     input.setAttribute("rows", "2");
-    input.placeholder = "就所选范围提问…(Enter 发送,Shift+Enter 换行)";
+    input.placeholder = "就所选范围向知识库提问… (Enter 发送，Shift+Enter 换行)";
     input.value = chat.input || "";
     input.addEventListener("input", () => { chat.input = input.value; autoGrow(); });
     // 自动增高:按内容撑开,封顶约 6 行,超出内部滚动
@@ -4578,12 +4896,14 @@
     }
     // 聚焦微光:composer 边框亮起 + 柔和外圈
     input.addEventListener("focus", () => {
-      composer.style.setProperty("border-color", C.accent);
+      composer.style.setProperty("border-color", C.borderStrong);
+      composer.style.setProperty("background", C.surface);
       composer.style.setProperty("box-shadow", "0 0 0 3px " + C.accentSoft);
     });
     input.addEventListener("blur", () => {
-      composer.style.setProperty("border-color", C.border);
-      composer.style.setProperty("box-shadow", "");
+      composer.style.setProperty("border-color", C.borderStrong);
+      composer.style.setProperty("background", C.bg2);
+      composer.style.setProperty("box-shadow", C.cardShadow);
     });
     input.addEventListener("keydown", (e) => {
       if (e.key === "Enter" && !e.shiftKey) {
@@ -4593,14 +4913,14 @@
       }
     });
 
-    const groupsBtn = mkDrop("groups", "选择参与对话的分组,可多选");
-    const itemsBtn = mkDrop("items", "选择参与对话的资料,可多选搜索");
-    const modelBtn = mkDrop("model", "选择本次对话使用的模型");
+    const groupsBtn = mkDrop("groups", "tag", "选择参与对话的分组,可多选");
+    const itemsBtn = mkDrop("items", "file", "选择参与对话的资料,可多选搜索");
+    const modelBtn = mkDrop("model", "sparkles", "选择本次对话使用的模型");
     modelBtn.style.setProperty("margin-left", "auto"); // 模型控件顶到右侧,范围控件靠左
 
     // 模型按钮的选中值与列表同步;缓存为空或超过 1 小时时后台静默拉一次模型列表(失败不打扰)
     function updateModelBtn() {
-      drops.model.label.textContent = "模型:" + (chat.model || "跟随设置");
+      drops.model.label.textContent = "模型: " + (chat.model || "跟随设置");
       drops.model.btn.style.setProperty("color", chat.model ? C.text : C.sub);
       if (openDrop === "model") renderDropPanel("model");
     }
@@ -4620,13 +4940,18 @@
         .catch(() => { /* 静默:保持「跟随设置」,可去设置页手动刷新 */ });
     }
 
-    // 发送/停止合一:空闲 ➤ 发送,运行中 ■ 停止(同一位置,状态由 renderChat 同步)
+    // 发送/停止合一:空闲纸飞机图标发送,运行中 ■ 停止(同一位置,状态由 renderChat 同步)
     const sendBtn = h("button", {
-      width: "34px", height: "34px", "border-radius": "50%", cursor: "pointer",
-      border: "none", background: C.primaryBg, color: C.primaryFg, "font-size": "16px",
-      "flex-shrink": "0", "line-height": "1",
+      width: "32px", height: "32px", padding: "0", "border-radius": "9999px", cursor: "pointer",
+      border: "none", background: C.primaryBg, color: C.primaryFg, "font-size": "13px",
+      display: "inline-flex", "align-items": "center", "justify-content": "center",
+      "flex-shrink": "0", "line-height": "1", position: "relative",
       transition: "background .15s ease, transform .12s ease, opacity .15s ease",
-    }, "➤");
+    }, svgIcon("send", 13), h("span", {
+      position: "absolute", width: "1px", height: "1px", padding: "0", margin: "-1px",
+      overflow: "hidden", clip: "rect(0, 0, 0, 0)", border: "0",
+    }, "➤"));
+    sendBtn.type = "button";
     sendBtn.title = "发送";
     sendBtn.addEventListener("mouseenter", () => sendBtn.style.setProperty("transform", "scale(1.06)"));
     sendBtn.addEventListener("mouseleave", () => sendBtn.style.setProperty("transform", ""));
@@ -4638,13 +4963,14 @@
         .catch((e) => { console.error("[webbin] chatSend:", e); toast("发送出错: " + e.message, true); });
     });
 
-    const bottomRow = h("div", { display: "flex", "align-items": "center", gap: "2px", "margin-top": "2px" },
+    const bottomRow = h("div", { display: "flex", "align-items": "center", gap: "6px", "margin-top": "6px", "flex-wrap": "wrap" },
       groupsBtn, itemsBtn, modelBtn, sendBtn); // 模型 margin-left:auto 顶到右侧;范围控件靠左
     // 输入框是三个下拉面板的定位基准(relative):面板横跨输入框宽度、悬在底行上方,窄屏也不会跑出面板外
     const composer = h("div", {
       display: "flex", "flex-direction": "column", position: "relative",
-      border: "1px solid " + C.borderStrong, background: C.bg2, "border-radius": "18px",
-      padding: "8px 10px", "flex-shrink": "0",
+      border: "1px solid " + C.borderStrong, background: C.bg2, "border-radius": "20px",
+      padding: "10px 12px", "flex-shrink": "0", "box-shadow": C.cardShadow,
+      transition: "border-color .15s ease, background .15s ease, box-shadow .15s ease",
     }, input, bottomRow);
     composer.append(drops.groups.panel, drops.items.panel, drops.model.panel);
 
@@ -4728,10 +5054,10 @@
     const b = h("button", {
       padding: "5px 11px", "border-radius": "9999px", cursor: "pointer",
       display: "inline-flex", "align-items": "center", "justify-content": "center", gap: "5px",
-      "font-size": "12px", "font-weight": "500", border: "none",
+      "font-size": "12px", "font-weight": "500", border: "none", "white-space": "nowrap",
       background: "transparent", color: C.sub,
       transition: "color .15s ease, background .15s ease, box-shadow .15s ease",
-    }, iconName ? svgIcon(iconName, 13) : null, label);
+    }, label, iconName ? svgIcon(iconName, 13) : null);
     b.className = "wi-seg-btn";
     b.addEventListener("click", onClick);
     return b;
