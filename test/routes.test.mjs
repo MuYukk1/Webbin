@@ -19,6 +19,8 @@ const { default: mod } = await import("../index.js");
 
 const KV = {
   store: new Map(),
+  activeGets: 0,
+  maxActiveGets: 0,
   async get(k, t) { const v = this.store.get(k); return v == null ? null : (t === "json" ? JSON.parse(v) : v); },
   async put(k, v) { this.store.set(k, String(v)); },
   async delete(k) { this.store.delete(k); },
@@ -115,6 +117,27 @@ t("删除后列表为空", (await req("GET", "/api/items", null, "test-token")).
   t("元数据分页返回 total 与游标", m1.data.total === 2 && m1.data.items.length === 1 && m1.data.next_cursor === "1");
   t("元数据含摘要与分组、不含正文", typeof m1.data.items[0].summary === "string" && m1.data.items[0].group_id === "default" && !("content" in m1.data.items[0]));
   t("metadata 需要鉴权", (await req("GET", "/api/kb/metadata", null)).status === 401);
+}
+
+// ---- 有界并发列表读取 ----
+{
+  const previousGet = KV.get;
+  KV.get = async function (k, t) {
+    if (!k.startsWith("item:")) return previousGet.call(this, k, t);
+    this.activeGets++;
+    this.maxActiveGets = Math.max(this.maxActiveGets, this.activeGets);
+    await new Promise((resolve) => setTimeout(resolve, 2));
+    try { return await previousGet.call(this, k, t); }
+    finally { this.activeGets--; }
+  };
+  const before = (await req("GET", "/api/items", null, "test-token")).data.items.length;
+  for (let i = 0; i < 40; i++) {
+    await req("POST", "/api/save", { url: `https://example.com/parallel/${i}`, title: `并发条目 ${i}` }, "test-token");
+  }
+  KV.maxActiveGets = 0;
+  const parallelList = await req("GET", "/api/items", null, "test-token");
+  t("列表读取使用有界并发且保留全部条目", parallelList.data.items.length === before + 40 && KV.maxActiveGets > 1 && KV.maxActiveGets <= 16);
+  KV.get = previousGet;
 }
 
 // ---- 聊天代理 ----

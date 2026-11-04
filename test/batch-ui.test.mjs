@@ -73,8 +73,13 @@ console.log("普通网页");
 {
   const root = openPanel("https://example.com/article", "文章");
   check("保留单条保存", hasText(root, "保存到收集箱"));
+  check("普通保存入口提供分组选择", hasText(root, "保存到分组"));
   check("出现批量保存网址入口", hasText(root, "批量保存多个网址"));
   check("不出现 UP 主批量入口", !hasText(root, "批量获取视频字幕"));
+  click(tabButton(root, "已保存"));
+  check("已保存页提供标题搜索", findAll(root, (e) => e.tagName === "INPUT" && e.placeholder === "搜索标题或网站").length === 1);
+  check("已保存页提供分组筛选", findAll(root, (e) => e.tagName === "SELECT").some((e) => e.children.some((c) => c.textContent === "全部分组")));
+  check("已保存页提供分组管理入口", hasText(root, "管理分组"));
 }
 
 await settle();

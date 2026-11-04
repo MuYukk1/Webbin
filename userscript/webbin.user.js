@@ -3,7 +3,7 @@
 // @name:en      Webbin Saver
 // @description  保存网页正文/B站视频到自己的 Cloudflare Worker,双端 Edge 可用;B站视频可抓取字幕/评论、UP主主页按时间范围批量抓字幕、批量保存多个网址,AI 总结、分组管理与知识库对话(工具调用 Agent)、下载归档
 // @namespace    https://github.com/local/webbin
-// @version      0.9.1
+// @version      0.9.2
 // @updateURL    /userscript.user.js
 // @author       you
 // @match        *://*/*
@@ -187,6 +187,89 @@
   let toastEl = null;
   // 本次会话内保存的条目:KV 最终一致性(最长约60s)期间合并进列表,保存即所见
   const savedLocal = [];
+  const DEFAULT_GROUP = { id: "default", name: "默认", builtin: true };
+  let groupsCache = [DEFAULT_GROUP];
+  let groupsPromise = null;
+  let groupsLoaded = false;
+  let selectedSaveGroup = GM_getValue("save_group_id", "default") || "default";
+  const savedItemsCacheWorker = $storage.get().worker;
+  const savedItemsCacheRecord = GM_getValue("saved_items_cache_v1", null);
+  let savedItemsCache = savedItemsCacheRecord && !Array.isArray(savedItemsCacheRecord)
+    && savedItemsCacheRecord.worker === savedItemsCacheWorker
+    ? savedItemsCacheRecord.items : null;
+  let savedListGroup = GM_getValue("saved_list_group_v1", "all") || "all";
+  let savedListQuery = GM_getValue("saved_list_query_v1", "") || "";
+  if (!Array.isArray(savedItemsCache)) savedItemsCache = null;
+  const saveGroupListeners = new Set();
+
+  function loadGroups(force = false) {
+    if (groupsPromise && !force) return groupsPromise;
+    groupsPromise = gmFetch("GET", "/api/groups")
+      .then(({ groups }) => {
+        groupsCache = Array.isArray(groups) && groups.length ? groups : [DEFAULT_GROUP];
+        groupsLoaded = true;
+        if (!groupsCache.some((g) => g.id === selectedSaveGroup)) setSaveGroup("default");
+        for (const listener of saveGroupListeners) listener();
+        return groupsCache;
+      })
+      .catch((e) => {
+        groupsPromise = null;
+        throw e;
+      });
+    return groupsPromise;
+  }
+
+  function setSaveGroup(id) {
+    selectedSaveGroup = id || "default";
+    try { GM_setValue("save_group_id", selectedSaveGroup); } catch { /* 本次选择仍然有效 */ }
+    for (const listener of saveGroupListeners) listener();
+  }
+
+  function makeGroupSelect(onChange) {
+    const select = h("select", {
+      flex: "1", "min-width": "130px", padding: "7px 9px", "border-radius": "8px",
+      border: `1px solid ${C.border}`, background: C.bg2, color: C.text, "font-size": "13px",
+    });
+    const render = () => {
+      const valid = groupsCache.some((g) => g.id === selectedSaveGroup);
+      if (groupsLoaded && !valid) selectedSaveGroup = "default";
+      select.replaceChildren(...groupsCache.map((g) => {
+        const option = h("option", { value: g.id }, g.name);
+        option.value = g.id;
+        return option;
+      }));
+      select.value = selectedSaveGroup;
+      if (!groupsPromise) loadGroups().catch(() => {});
+    };
+    select.addEventListener("change", () => {
+      setSaveGroup(select.value);
+      onChange && onChange(select.value);
+    });
+    saveGroupListeners.add(render);
+    select._disposeGroupListener = () => saveGroupListeners.delete(render);
+    render();
+    return select;
+  }
+
+  function cacheSavedItems(items) {
+    savedItemsCache = items;
+    try { GM_setValue("saved_items_cache_v1", { worker: savedItemsCacheWorker, items }); } catch { /* 缓存失败不影响列表 */ }
+  }
+
+  function recordSaved(item) {
+    savedLocal.unshift(item);
+    if (savedItemsCache) {
+      savedItemsCache = [
+        {
+          id: item.id, url: item.url, title: item.title, site: item.site, type: item.type,
+          group_id: item.group_id || "default", created_at: item.created_at,
+          has_summary: !!item.summary, has_content: !!item.content, status: item.status, archive: item.archive,
+        },
+        ...savedItemsCache.filter((x) => x.id !== item.id),
+      ];
+      cacheSavedItems(savedItemsCache);
+    }
+  }
   function toast(msg, isError) {
     if (toastEl) toastEl.remove();
     toastEl = h("div", {
@@ -930,13 +1013,13 @@
   }
 
   // 批量场景复用单条字幕抓取:抓完直接写入收集箱,返回标题与统计
-  async function collectBiliSubtitle(bvid, page = 1) {
+  async function collectBiliSubtitle(bvid, page = 1, groupId = selectedSaveGroup) {
     const r = await saveBiliSubtitle({ bvid, page });
     const title = `${r.baseTitle} · ${r.suffix}`;
     const saved = await gmFetch("POST", "/api/save", {
-      url: r.url, title, site: "www.bilibili.com", type: "bilibili", content: r.content,
+      url: r.url, title, site: "www.bilibili.com", type: "bilibili", content: r.content, group_id: groupId,
     });
-    savedLocal.unshift(saved);
+    recordSaved(saved);
     return { title, stat: r.stat, saved };
   }
 
@@ -1198,7 +1281,7 @@
 
   // 批量保存单条网址:普通网页存正文,B站普通视频存字幕
   // seenRefs 是 Map<去重键, Promise>,用于在短链解析后按视频/最终网页去重
-  async function saveBatchUrl(rawUrl, seenRefs) {
+  async function saveBatchUrl(rawUrl, seenRefs, groupId = selectedSaveGroup) {
     let url = normalizeBatchUrl(rawUrl);
     if (!url) throw new Error("网址格式不正确");
     if (classifyBatchUrl(url) === "bili-short") url = await resolveB23Url(url);
@@ -1206,7 +1289,7 @@
     if (ref) {
       const key = ref.bvid + ":" + ref.page;
       return dedupeTask(seenRefs, key, url, "重复视频,已跳过",
-        () => collectBiliSubtitle(ref.bvid, ref.page));
+        () => collectBiliSubtitle(ref.bvid, ref.page, groupId));
     }
     if (classifyBatchUrl(url) === "bili-other") {
       throw new Error("不是普通视频页(BV/av),请单独打开后用「仅存链接」保存");
@@ -1222,8 +1305,9 @@
         site: host || "web",
         type: "web",
         content: art.lines.join("\n\n"),
+        group_id: groupId,
       });
-      savedLocal.unshift(saved);
+      recordSaved(saved);
       return { title, stat: `正文 ${art.lines.length} 段` };
     })());
   }
@@ -1339,7 +1423,7 @@
     return base ? base + "/userscript.user.js" : "";
   };
   const SCRIPT_VERSION =
-    (typeof GM_info !== "undefined" && GM_info.script && GM_info.script.version) || "0.9.1";
+    (typeof GM_info !== "undefined" && GM_info.script && GM_info.script.version) || "0.9.2";
   let versionCache = null;
 
   function renderVersionFooter(el, v) {
@@ -1490,6 +1574,11 @@
       b.style.borderBottomColor = k === key ? C.accent : "transparent";
     }
     const body = panel._state.body;
+    const dispose = (node) => {
+      if (node._disposeGroupListener) node._disposeGroupListener();
+      for (const child of node.children || []) dispose(child);
+    };
+    for (const child of body.children || []) dispose(child);
     body.replaceChildren();
     // 列表 Tab 顶部内边距归零:批量栏 sticky top:0 才能钉在可见顶边,内容不会从栏上方露出
     // 对话 Tab 自管布局(消息区独立滚动),需关闭 body 滚动并去内边距
@@ -1652,7 +1741,7 @@
     }
   }
 
-  async function runUpBatch(mid, bounds) {
+  async function runUpBatch(mid, bounds, groupId = selectedSaveGroup) {
     const st = upBatchState;
     st.running = true; st.cancel = false; st.aborted = false; st.error = "";
     st.total = 0; st.done = 0; st.ok = 0; st.fail = 0; st.skipped = 0;
@@ -1680,7 +1769,7 @@
       await runPool(res.videos, 2, async (v) => {
         if (st.cancel) { st.skipped++; st.done++; paintUpBatch(); return; }
         try {
-          const r = await collectBiliSubtitle(v.bvid, 1);
+          const r = await collectBiliSubtitle(v.bvid, 1, groupId);
           st.ok++;
           pushJobResult(st, true, v.title, r.stat);
           streak = 0; lastMsg = "";
@@ -1748,7 +1837,7 @@
         GM_setValue("up_batch_start", bounds.start);
         GM_setValue("up_batch_end", bounds.end);
       } catch { /* 存储满不影响本次任务 */ }
-      runUpBatch(mid, bounds);
+      runUpBatch(mid, bounds, selectedSaveGroup);
     } finally {
       st.checking = false;
       paintUpBatch();
@@ -1865,7 +1954,7 @@
     return box;
   }
 
-  async function runBatchSave(urls) {
+  async function runBatchSave(urls, groupId = selectedSaveGroup) {
     const st = batchSaveState;
     st.running = true; st.cancel = false; st.aborted = false; st.error = "";
     st.total = urls.length; st.done = 0; st.ok = 0; st.fail = 0; st.skipped = 0;
@@ -1877,7 +1966,7 @@
       await runPool(urls, 3, async (url) => {
         if (st.cancel) { st.skipped++; st.done++; paintBatchSave(); return; }
         try {
-          const r = await saveBatchUrl(url, seenRefs);
+          const r = await saveBatchUrl(url, seenRefs, groupId);
           if (r.skipped) {
             st.skipped++;
             pushJobResult(st, true, r.title, r.stat);
@@ -1945,7 +2034,7 @@
       if (capped.length >= 10 && !confirm(
         `将批量保存 ${capped.length} 个网址(普通网页存正文,B站视频抓字幕),继续?`,
       )) return;
-      runBatchSave(capped);
+      runBatchSave(capped, batchSaveDom ? batchSaveDom.groupSelect.value : selectedSaveGroup);
     } finally {
       st.checking = false;
       paintBatchSave();
@@ -1954,6 +2043,7 @@
 
   function buildBatchSaveSection() {
     const st = batchSaveState;
+    const groupSelect = makeGroupSelect();
     const ta = h("textarea", {
       width: "100%", "box-sizing": "border-box", padding: "8px 10px",
       "border-radius": "8px", border: `1px solid ${C.border}`,
@@ -1981,6 +2071,8 @@
 
     const body = h("div", { "margin-top": "8px" },
       ta,
+      h("div", { display: "flex", "align-items": "center", gap: "8px", "margin-top": "8px", "font-size": "12px", color: C.sub },
+        h("span", {}, "保存到分组"), groupSelect),
       h("div", { display: "flex", gap: "8px", "margin-top": "8px", "flex-wrap": "wrap" }, startBtn, stopBtn, clearBtn),
       h("div", { "font-size": "11px", color: C.sub, "margin-top": "6px" },
         `普通网页提取正文,B站普通视频抓字幕;重复网址自动去重,单次最多 ${BATCH_SAVE_MAX} 条。`),
@@ -1997,7 +2089,7 @@
       st.open = root.open;
       try { GM_setValue("batch_save_open", st.open); } catch { /* 忽略存储失败 */ }
     });
-    batchSaveDom = { root, ta, startBtn, stopBtn, clearBtn, status, report };
+    batchSaveDom = { root, ta, groupSelect, startBtn, stopBtn, clearBtn, status, report };
     paintBatchSave();
     return root;
   }
@@ -2006,6 +2098,7 @@
     const vp = getBiliVideoPage(); // 普通视频页(BV/av):提供字幕/评论抓取
     const space = getBiliSpacePage(); // UP 主空间页:提供按时间范围批量抓字幕
     const bili = isBiliPage();
+    const groupSelect = makeGroupSelect();
     const titleInput = h("input", {
       width: "100%", "box-sizing": "border-box", padding: "8px 10px",
       "border-radius": "8px", border: `1px solid ${C.border}`,
@@ -2041,8 +2134,9 @@
           site: "www.bilibili.com",
           type: "bilibili",
           content: r.content,
+          group_id: groupSelect.value,
         });
-        savedLocal.unshift(saved);
+        recordSaved(saved);
         preview.style.color = C.text;
         const lines = r.content.split("\n");
         preview.replaceChildren(
@@ -2068,8 +2162,9 @@
           site: location.hostname,
           type: "bilibili",
           content: "",
+          group_id: groupSelect.value,
         });
-        savedLocal.unshift(saved);
+        recordSaved(saved);
         toast("已保存 ✓");
       } catch (e) {
         toast("保存失败: " + e.message, true);
@@ -2083,6 +2178,8 @@
         h("div", { "font-weight": "600", "font-size": "14px" }, "B站 UP 主主页"),
         h("div", { "margin-top": "4px", "font-size": "12px", color: C.sub },
           "按时间范围批量抓取该 UP 主的投稿视频字幕;普通网页/B站视频的批量保存也在下方。"),
+        h("div", { display: "flex", gap: "8px", "align-items": "center", "margin-top": "10px", "flex-wrap": "wrap" },
+          h("span", { "font-size": "12px", color: C.sub }, "保存到分组"), groupSelect),
         h("div", { display: "flex", gap: "8px", "margin-top": "10px", "flex-wrap": "wrap" }, linkBtn),
         buildUpBatchSection(space),
         buildBatchSaveSection(),
@@ -2099,6 +2196,8 @@
       body.append(
         h("div", { "font-weight": "600", "margin-bottom": "8px" }, "标题"),
         titleInput,
+        h("div", { display: "flex", gap: "8px", "align-items": "center", "margin-top": "10px" },
+          h("span", { "font-size": "12px", color: C.sub }, "保存到分组"), groupSelect),
         h("div", { display: "flex", gap: "8px", "margin-top": "10px", "flex-wrap": "wrap" }, subBtn, cmtBtn, linkBtn),
         preview,
         h("div", { "margin-top": "10px", "font-size": "12px", color: C.sub },
@@ -2147,8 +2246,9 @@
           site: location.hostname,
           type: "web",
           content: (result.lines || []).join("\n\n"),
+          group_id: groupSelect.value,
         });
-        savedLocal.unshift(saved);
+        recordSaved(saved);
         toast("已保存 ✓");
       } catch (e) {
         toast("保存失败: " + e.message, true);
@@ -2165,6 +2265,8 @@
     body.append(
       h("div", { "font-weight": "600", "margin-bottom": "8px" }, "标题"),
       titleInput,
+      h("div", { display: "flex", gap: "8px", "align-items": "center", "margin-top": "10px" },
+        h("span", { "font-size": "12px", color: C.sub }, "保存到分组"), groupSelect),
       bili ? "" : h("div", { display: "flex", gap: "8px", "margin-top": "10px", "flex-wrap": "wrap" }, saveBtn, extractBtn),
       bili ? h("div", { "margin-top": "10px" }, saveBtn) : "",
       preview,
@@ -2210,9 +2312,92 @@
     }
     const reportEl = h("div");
     const listEl = h("div");
-    body.append(bar, reportEl, listEl);
+    const controls = h("div", { display: "flex", gap: "8px", "align-items": "center", "flex-wrap": "wrap", padding: "10px 0 6px" });
+    const searchInput = mkInput(savedListQuery, "搜索标题或网站");
+    searchInput.style.setProperty("flex", "1");
+    searchInput.style.setProperty("min-width", "150px");
+    const refreshBtn = mkBtn("刷新", () => refreshItems(true));
+    const groupFilter = h("select", {
+      "min-width": "120px", "max-width": "100%", padding: "7px 9px", "border-radius": "8px",
+      border: `1px solid ${C.border}`, background: C.bg2, color: C.text, "font-size": "13px",
+    });
+    const groupManager = h("details", { "margin-bottom": "8px", padding: "8px", background: C.bg2, "border-radius": "8px" },
+      h("summary", { cursor: "pointer", "font-weight": "600", "font-size": "13px" }, "管理分组"),
+      renderGroupManager((groups) => {
+        const valid = new Set(groups.map((g) => g.id));
+        items = items.map((it) => valid.has(it.group_id || "default") ? it : { ...it, group_id: "default" });
+        cacheSavedItems(items);
+        renderGroupFilter();
+        renderList();
+      }),
+    );
+    controls.append(searchInput, groupFilter, refreshBtn, mkBtn("分组管理", () => { groupManager.open = !groupManager.open; }));
+    body.append(controls, groupManager, bar, reportEl, listEl);
     let items = [];
+    let selectedGroup = savedListGroup;
     const barButtons = {};
+
+    function renderGroupFilter() {
+      const keep = selectedGroup;
+      groupFilter.replaceChildren(...[{ id: "all", name: "全部分组" }, ...groupsCache].map((g) => {
+        const option = h("option", { value: g.id }, g.name);
+        option.value = g.id;
+        return option;
+      }));
+      selectedGroup = groupsCache.some((g) => g.id === keep) || keep === "all" ? keep : "all";
+      savedListGroup = selectedGroup;
+      try { GM_setValue("saved_list_group_v1", selectedGroup); } catch { /* 筛选仍可使用 */ }
+      groupFilter.value = selectedGroup;
+    }
+
+    const visibleItems = () => {
+      const q = searchInput.value.trim().toLocaleLowerCase();
+      return items.filter((it) => {
+        if (selectedGroup !== "all" && (it.group_id || "default") !== selectedGroup) return false;
+        return !q || `${it.title || ""} ${it.site || ""} ${it.url || ""}`.toLocaleLowerCase().includes(q);
+      });
+    };
+
+    function mergeRemoteItems(remote) {
+      const remoteIds = new Set(remote.map((x) => x.id));
+      for (let i = savedLocal.length - 1; i >= 0; i--) {
+        if (remoteIds.has(savedLocal[i].id)) savedLocal.splice(i, 1);
+      }
+      const localMerged = savedLocal
+        .filter((x) => !remoteIds.has(x.id))
+        .map((x) => ({ ...x, group_id: x.group_id || "default", has_summary: !!x.summary, has_content: !!x.content }));
+      items = localMerged.concat(remote).sort((a, b) => b.created_at - a.created_at);
+      const ids = new Set(items.map((x) => x.id));
+      for (const id of [...selectedIds]) if (!ids.has(id)) selectedIds.delete(id);
+      cacheSavedItems(items);
+      renderList();
+      renderBar();
+    }
+
+    function refreshItems(manual = false) {
+      refreshBtn.disabled = true;
+      if (manual) refreshBtn.textContent = "刷新中…";
+      return gmFetch("GET", "/api/items")
+        .then(({ items: remote }) => mergeRemoteItems(remote))
+        .catch((e) => {
+          if (!savedItemsCache) {
+            listEl.replaceChildren(h("div", { color: C.danger, padding: "20px", "text-align": "center" }, "加载失败: " + e.message));
+          } else if (manual) toast("刷新失败: " + e.message, true);
+        })
+        .finally(() => { refreshBtn.disabled = false; refreshBtn.textContent = "刷新"; });
+    }
+
+    groupFilter.addEventListener("change", () => {
+      selectedGroup = groupFilter.value;
+      savedListGroup = selectedGroup;
+      try { GM_setValue("saved_list_group_v1", selectedGroup); } catch { /* 筛选仍可使用 */ }
+      renderList(); renderBar();
+    });
+    searchInput.addEventListener("input", () => {
+      savedListQuery = searchInput.value;
+      try { GM_setValue("saved_list_query_v1", savedListQuery); } catch { /* 搜索仍可使用 */ }
+      renderList(); renderBar();
+    });
     batchBarButtons = barButtons; // 批量循环经 paintProgress 写进度时,始终命中当前 Tab 的按钮
 
     // 批量总结失败报告:按错误信息分组展示,比一闪而过的 toast 更可靠
@@ -2256,20 +2441,27 @@
         listEl.append(h("div", { color: C.sub, padding: "20px", "text-align": "center" }, "还没有保存过内容"));
         return;
       }
-      for (const it of items) listEl.append(renderListItem(it, renderBar));
+      const visible = visibleItems();
+      if (!visible.length) {
+        listEl.append(h("div", { color: C.sub, padding: "20px", "text-align": "center" },
+          "没有匹配的资料", h("div", { "margin-top": "4px", "font-size": "12px" }, "试试其他关键词或切换分组")));
+        return;
+      }
+      for (const it of visible) listEl.append(renderListItem(it, renderBar));
     };
 
     function renderBar() {
       bar.replaceChildren();
-      const n = selectedIds.size;
+      const n = visibleItems().filter((it) => selectedIds.has(it.id)).length;
       bar.append(h("div", {
         color: n ? C.accent : C.sub, "font-size": "13px", "font-weight": "600",
       }, n ? `已选 ${n} 项` : "批量操作"));
 
-      const allBox = mkCheckbox(items.length > 0 && items.every((it) => selectedIds.has(it.id)));
-      allBox.disabled = batchBusy || !items.length;
+      const visible = visibleItems();
+      const allBox = mkCheckbox(visible.length > 0 && visible.every((it) => selectedIds.has(it.id)));
+      allBox.disabled = batchBusy || !visible.length;
       allBox.addEventListener("change", () => {
-        for (const it of items) {
+        for (const it of visible) {
           if (allBox.checked) selectedIds.add(it.id);
           else selectedIds.delete(it.id);
         }
@@ -2288,7 +2480,7 @@
           border: `1px solid ${C.border}`, background: C.bg2, color: C.text, "font-size": "13px",
         });
         sel.append(h("option", { value: "default" }, "默认"));
-        for (const g of listGroupsCache) sel.append(h("option", { value: g.id }, g.name));
+      for (const g of groupsCache.filter((x) => !x.builtin)) sel.append(h("option", { value: g.id }, g.name));
         const okBtn = mkBtn("确定", C.accent, true, () => batchMoveConfirm(sel.value));
         const cancelBtn = mkBtn("取消", undefined, false, batchMoveCancel);
         okBtn.disabled = !n;
@@ -2317,11 +2509,8 @@
     // ---- 分组:批量移动 + 就这些聊 ----
 
     let moveMode = false;
-    let listGroupsCache = []; // 分组列表缓存,renderBar 的选择框与移动共用
-
     function refreshListGroups() {
-      return gmFetch("GET", "/api/groups")
-        .then(({ groups }) => { listGroupsCache = groups.filter((g) => !g.builtin); if (moveMode) renderBar(); })
+      return loadGroups().then(() => { if (moveMode) renderBar(); })
         .catch(() => { /* 分组加载失败不阻塞列表,移动时选择框仍有默认组 */ });
     }
 
@@ -2337,7 +2526,7 @@
     }
 
     function batchMoveConfirm(gid) {
-      const ids = [...selectedIds];
+      const ids = visibleItems().filter((it) => selectedIds.has(it.id)).map((it) => it.id);
       if (!ids.length) return;
       moveMode = false;
       batchBusy = true; // assign 是逐条写(≤200),按钮全禁用防并发,完成靠 toast
@@ -2353,7 +2542,7 @@
 
     // 带着勾选条目进入对话 Tab:显式选中 = 新会话 + 摘要自动注入
     function batchChat() {
-      const ids = [...selectedIds];
+      const ids = visibleItems().filter((it) => selectedIds.has(it.id)).map((it) => it.id);
       if (!ids.length) return;
       if (ids.length > CHAT_LIMITS.maxSelected) {
         toast(`最多选 ${CHAT_LIMITS.maxSelected} 条直接对话,请缩小范围`, true);
@@ -2375,10 +2564,11 @@
     }
 
     async function batchDelete() {
-      if (batchBusy || !confirm(`确定删除选中的 ${selectedIds.size} 条?`)) return;
+      const targets = visibleItems().filter((it) => selectedIds.has(it.id));
+      if (batchBusy || !targets.length || !confirm(`确定删除选中的 ${targets.length} 条?`)) return;
       batchBusy = true;
       renderBar();
-      const ids = [...selectedIds];
+      const ids = targets.map((it) => it.id);
       let ok = 0, fail = 0;
       for (let i = 0; i < ids.length; i++) {
         batchProgress = { btn: "del", text: `删除中 ${i + 1}/${ids.length}…` };
@@ -2389,10 +2579,12 @@
           selectedIds.delete(ids[i]);
           const idx = savedLocal.findIndex((x) => x.id === ids[i]);
           if (idx >= 0) savedLocal.splice(idx, 1);
+          items = items.filter((x) => x.id !== ids[i]);
         } catch { fail++; }
       }
       batchBusy = false;
       batchProgress = null;
+      cacheSavedItems(items);
       toast(fail ? `删除完成:成功 ${ok},失败 ${fail}` : `已删除 ${ok} 条 ✓`);
       // 用户中途切走了就不强拽回列表页,回来时会看到刷新后的列表
       if (currentTab === "list") switchTab("list");
@@ -2402,8 +2594,9 @@
     // 逐条记录失败原因;连续 2 条相同错误视为系统性问题(模型不存在/密钥无效/限流),提前中止不再干等
     async function batchSummarize() {
       if (batchBusy) return;
-      const targets = items.filter((it) => selectedIds.has(it.id) && it.has_content && !it.has_summary);
-      const skipped = selectedIds.size - targets.length;
+    const selectedItems = visibleItems().filter((it) => selectedIds.has(it.id));
+    const targets = selectedItems.filter((it) => it.has_content && !it.has_summary);
+    const skipped = selectedItems.length - targets.length;
       if (!targets.length) {
         toast("所选条目都没有可总结的正文(无正文或已有总结)");
         return;
@@ -2455,7 +2648,7 @@
       try {
         const { items: fullItems } = await gmFetch("GET", "/api/items?full=1");
         const byId = new Map(fullItems.map((x) => [x.id, x]));
-        const chosen = items
+      const chosen = visibleItems()
           .filter((it) => selectedIds.has(it.id))
           .map((it) => byId.get(it.id) || savedLocal.find((x) => x.id === it.id) || it);
         if (!chosen.length) throw new Error("没有可导出的条目");
@@ -2470,30 +2663,20 @@
       renderBar();
     }
 
+    renderGroupFilter();
     renderBar(); // 列表加载期间批量栏先常驻显示
     renderReport(); // 上一次批量总结如有失败,进来就看到
     const loading = h("div", { color: C.sub, padding: "20px", "text-align": "center" }, "加载中…");
-    listEl.append(loading);
-    gmFetch("GET", "/api/items")
-      .then(({ items: remote }) => {
-        // 合并本地暂存的新条目(KV 传播延迟期间),已传播到的从暂存中清掉
-        const remoteIds = new Set(remote.map((x) => x.id));
-        for (let i = savedLocal.length - 1; i >= 0; i--) {
-          if (remoteIds.has(savedLocal[i].id)) savedLocal.splice(i, 1);
-        }
-        const localMerged = savedLocal
-          .filter((x) => !remoteIds.has(x.id))
-          .map((x) => ({ ...x, has_summary: !!x.summary, has_content: !!x.content }));
-        items = localMerged.concat(remote);
-        // 列表里已不存在的选择项清掉
-        const ids = new Set(items.map((x) => x.id));
-        for (const id of [...selectedIds]) if (!ids.has(id)) selectedIds.delete(id);
-        renderList();
-        renderBar();
-      })
-      .catch((e) => {
-        loading.textContent = "加载失败: " + e.message;
-        loading.style.color = C.danger;
+    if (savedItemsCache) {
+      items = savedItemsCache;
+      renderList();
+    } else {
+      listEl.append(loading);
+    }
+    refreshListGroups();
+    Promise.allSettled([loadGroups(), refreshItems()])
+      .then(([groupResult, itemResult]) => {
+        if (groupResult.status === "fulfilled") { renderGroupFilter(); renderList(); }
       });
   }
 
@@ -2512,6 +2695,7 @@
 
   function renderListItem(it, onChange) {
     const date = new Date(it.created_at).toLocaleString("zh-CN", { hour12: false });
+    const groupName = groupsCache.find((g) => g.id === (it.group_id || "default"))?.name || "默认";
     const badges = h("span", { "font-size": "11px", "margin-left": "4px" },
       it.type === "bilibili" ? " 📺B站" : "",
       it.has_summary ? " ✨已总结" : "",
@@ -2524,7 +2708,7 @@
       onChange();
     });
     const metaRow = h("div", { "font-size": "12px", color: C.sub, "margin-top": "2px", display: "flex", "align-items": "center", "flex-wrap": "wrap" },
-      h("span", {}, `${it.site} · ${date}`), badges);
+      h("span", {}, `${it.site} · ${date} · ${groupName}`), badges);
     const textBlock = h("div", { flex: "1", "min-width": "0" },
       h("div", { "font-weight": "600", overflow: "hidden", "text-overflow": "ellipsis", "white-space": "nowrap" }, it.title),
       metaRow,
@@ -2857,13 +3041,28 @@
   }
 
   // ---- 分组管理(设置页) ----
-  function renderGroupManager() {
+  function renderGroupManager(onChanged) {
     const gmList = h("div", { "font-size": "13px" });
     const gmName = mkInput("", "新分组名(≤50 字,如「前端文章」)");
 
+    const afterChange = () => loadGroups(true)
+      .then((groups) => {
+        const valid = new Set(groups.map((g) => g.id));
+        if (savedItemsCache) {
+          cacheSavedItems(savedItemsCache.map((it) => valid.has(it.group_id || "default")
+            ? it : { ...it, group_id: "default" }));
+        }
+        for (let i = 0; i < savedLocal.length; i++) {
+          if (!valid.has(savedLocal[i].group_id || "default")) savedLocal[i] = { ...savedLocal[i], group_id: "default" };
+        }
+        onChanged && onChanged(groups);
+        renderGroups();
+      })
+      .catch((e) => toast(e.message, true));
+
     function renderGroups() {
-      gmFetch("GET", "/api/groups")
-        .then(({ groups }) => {
+      loadGroups()
+        .then((groups) => {
           gmList.replaceChildren();
           for (const g of groups) {
             const row = h("div", { display: "flex", "align-items": "center", gap: "8px", padding: "6px 0", "border-bottom": `1px solid ${C.border}` },
@@ -2874,13 +3073,13 @@
                   const nn = prompt(`修改分组名「${g.name}」为:`, g.name);
                   if (!nn || nn.trim() === g.name) return;
                   gmFetch("POST", "/api/groups", { action: "rename", id: g.id, name: nn.trim() })
-                    .then(() => renderGroups())
+                    .then(afterChange)
                     .catch((e) => toast(e.message, true));
                 }),
                 mkBtn("删除", C.danger, false, () => {
                   if (!confirm(`删除分组「${g.name}」?组内资料不删除,将归入默认组。`)) return;
                   gmFetch("POST", "/api/groups", { action: "delete", id: g.id })
-                    .then(() => { toast("分组已删除"); renderGroups(); })
+                    .then(() => { toast("分组已删除"); return afterChange(); })
                     .catch((e) => toast(e.message, true));
                 }),
               );
@@ -2897,7 +3096,7 @@
       const name = gmName.value.trim();
       if (!name) return toast("请输入分组名", true);
       gmFetch("POST", "/api/groups", { action: "create", name })
-        .then(() => { gmName.value = ""; toast("分组已创建 ✓"); renderGroups(); })
+        .then(() => { gmName.value = ""; toast("分组已创建 ✓"); return afterChange(); })
         .catch((e) => toast(e.message, true));
     });
 

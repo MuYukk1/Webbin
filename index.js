@@ -103,6 +103,20 @@ async function listItems(KV) {
   return out;
 }
 
+async function mapLimit(values, limit, fn) {
+  const out = new Array(values.length);
+  let next = 0;
+  const workers = Array.from({ length: Math.min(limit, values.length) }, async () => {
+    while (true) {
+      const index = next++;
+      if (index >= values.length) return;
+      out[index] = await fn(values[index], index);
+    }
+  });
+  await Promise.all(workers);
+  return out;
+}
+
 export default {
   async fetch(request, env) {
     if (request.method === "OPTIONS") return new Response(null, { headers: JSON_HEADERS });
@@ -163,29 +177,25 @@ export default {
     if (path === "/api/items" && request.method === "GET") {
       const ids = await listItems(KV);
       const resolveGroup = await groupResolver(KV);
-      const items = [];
-      for (const id of ids) {
+      const full = url.searchParams.get("full") === "1";
+      const rows = await mapLimit(ids, 16, async (id) => {
         const it = await KV.get("item:" + id, "json");
-        if (!it) continue;
-        const full = url.searchParams.get("full") === "1";
-        items.push(
-          full
-            ? it
-            : {
-                id: it.id,
-                url: it.url,
-                title: it.title,
-                site: it.site,
-                type: it.type,
-                group_id: resolveGroup(it),
-                created_at: it.created_at,
-                has_summary: !!it.summary,
-                has_content: !!it.content,
-                status: it.status,
-                archive: it.archive,
-              },
-        );
-      }
+        if (!it) return null;
+        return full ? it : {
+          id: it.id,
+          url: it.url,
+          title: it.title,
+          site: it.site,
+          type: it.type,
+          group_id: resolveGroup(it),
+          created_at: it.created_at,
+          has_summary: !!it.summary,
+          has_content: !!it.content,
+          status: it.status,
+          archive: it.archive,
+        };
+      });
+      const items = rows.filter(Boolean);
       items.sort((a, b) => b.created_at - a.created_at);
       return json({ items });
     }
