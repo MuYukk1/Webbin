@@ -76,6 +76,11 @@ console.log("StashDock 布局与偏好回归");
 const byButton = (text) => findAll(root, (e) => e.tagName === "BUTTON" && e.textContent.trim() === text)[0];
 const panel = panelOf(root);
 check("紧凑面板尺寸", panel.style.all().width === "min(94vw, 540px)" && panel.style.all().height === "min(84vh, 640px)");
+click(tabButton(root, "当前页"));
+{
+  const details = findAll(root, (e) => e.tagName === "DETAILS")[0];
+  check("当前页批量保存区域默认收起", Boolean(details) && !details.open);
+}
 click(tabButton(root, "设置"));
 click(byButton("靠右悬浮"));
 check("靠右位置立即生效并持久化", panel.parentElement.style.all()["justify-content"] === "flex-end" && script.store.panel_pos === "right");
@@ -88,6 +93,9 @@ click(tabButton(root, "已保存"));
 await settle();
 const list = () => findAll(root, (e) => e.className === "wi-list-grid" || e.className === "wi-list-rows")[0];
 check("默认双列网格", list().style.all().display === "grid" && list().style.all()["grid-template-columns"] === "repeat(2, minmax(0, 1fr))");
+check("Grid 按钮激活态高亮且 List 为透明", byButton("Grid")._attrs["aria-pressed"] === "true" && byButton("List")._attrs["aria-pressed"] === "false" && byButton("Grid").style.all().background !== "transparent" && byButton("List").style.all().background === "transparent");
+const batchBar = () => byButton("就这些聊")?.parentElement;
+check("未勾选时批量操作栏自动隐藏", batchBar()?.style.all().display === "none");
 let row = findAll(list(), (e) => e.className === "wi-card")[0];
 click(row);
 await settle();
@@ -95,8 +103,10 @@ check("卡片详情横跨双列", findAll(list(), (e) => e._detail)[0]?.style.al
 const cb = findAll(row, (e) => e.type === "checkbox")[0];
 cb.checked = true;
 cb.fire("change");
+check("勾选后批量操作栏自动浮现", batchBar()?.style.all().display === "flex");
 click(byButton("List"));
 check("切换紧凑列表并持久化", list().style.all().display === "flex" && script.store.saved_list_view_v1 === "list");
+check("List 按钮激活态高亮且 Grid 为透明", byButton("List")._attrs["aria-pressed"] === "true" && byButton("Grid")._attrs["aria-pressed"] === "false" && byButton("List").style.all().background !== "transparent" && byButton("Grid").style.all().background === "transparent");
 check("切视图保留选择", findAll(list(), (e) => e.type === "checkbox")[0].checked);
 click(tabButton(root, "设置"));
 click(tabButton(root, "已保存"));

@@ -3,7 +3,7 @@
 // @name:en      Webbin Saver
 // @description  保存网页正文/B站视频到自己的 Cloudflare Worker,双端 Edge 可用;B站视频可抓取字幕/评论、UP主主页按时间范围批量抓字幕、批量保存多个网址,AI 总结、分组管理与知识库对话(工具调用 Agent)、下载归档
 // @namespace    https://github.com/local/webbin
-// @version      0.9.3
+// @version      0.9.4
 // @updateURL    /userscript.user.js
 // @author       you
 // @match        *://*/*
@@ -176,6 +176,32 @@
       ["path", { d: "M10 14 21 3" }],
       ["path", { d: "M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" }],
     ],
+    more: [
+      ["circle", { cx: "12", cy: "12", r: "1.2" }],
+      ["circle", { cx: "19", cy: "12", r: "1.2" }],
+      ["circle", { cx: "5", cy: "12", r: "1.2" }],
+    ],
+    tv: [
+      ["rect", { width: "20", height: "15", x: "2", y: "7", rx: "2", ry: "2" }],
+      ["polyline", { points: "17 2 12 7 7 2" }],
+    ],
+    file: [
+      ["path", { d: "M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z" }],
+      ["path", { d: "M14 2v4a2 2 0 0 0 2 2h4" }],
+      ["path", { d: "M10 9H8" }],
+      ["path", { d: "M16 13H8" }],
+      ["path", { d: "M16 17H8" }],
+    ],
+    refresh: [
+      ["path", { d: "M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8" }],
+      ["path", { d: "M21 3v5h-5" }],
+      ["path", { d: "M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16" }],
+      ["path", { d: "M8 16H3v5" }],
+    ],
+    tag: [
+      ["path", { d: "M12.586 2.586A2 2 0 0 0 11.172 2H4a2 2 0 0 0-2 2v7.172a2 2 0 0 0 .586 1.414l8.704 8.704a2.426 2.426 0 0 0 3.42 0l6.58-6.58a2.426 2.426 0 0 0 0-3.42z" }],
+      ["circle", { cx: "7.5", cy: "7.5", r: "1" }],
+    ],
     eye: [
       ["path", { d: "M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0" }],
       ["circle", { cx: "12", cy: "12", r: "3" }],
@@ -249,22 +275,47 @@
 `);
   }
 
+  const SELECT_ARROW = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='${encodeURIComponent(C.sub)}' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E")`;
   if (typeof GM_addStyle === "function") GM_addStyle(`
 [data-wi-ui] { --wi-oklab: ; color-scheme: ${DARK ? "dark" : "light"}; }
 [data-wi-ui] *, [data-wi-ui] *::after { box-sizing: border-box; }
 [data-wi-ui] button, [data-wi-ui] input, [data-wi-ui] select, [data-wi-ui] textarea { font-family: inherit; }
-[data-wi-ui] button, [data-wi-ui] select { border-radius: 9999px !important; }
-[data-wi-ui] select { padding: 6px 12px !important; background: ${C.surface} !important; border: 1px solid ${C.borderStrong} !important; box-shadow: ${C.pillShadow}; }
+[data-wi-ui] button { border-radius: 9999px !important; }
+[data-wi-ui] select {
+  appearance: none; -webkit-appearance: none;
+  background-color: ${C.surface} !important;
+  background-image: ${SELECT_ARROW} !important;
+  background-repeat: no-repeat !important;
+  background-position: right 10px center !important;
+  background-size: 12px 12px !important;
+  padding: 7px 28px 7px 12px !important;
+  border-radius: 12px !important;
+  border: 1px solid ${C.borderStrong} !important;
+  box-shadow: ${C.pillShadow};
+  color: ${C.text};
+  font-size: 12.5px;
+  font-weight: 500;
+  line-height: 1.35;
+  cursor: pointer;
+}
+[data-wi-ui] select.wi-select-pill {
+  border-radius: 9999px !important;
+  padding: 5px 26px 5px 12px !important;
+  font-size: 12px !important;
+}
+[data-wi-ui] select option { background-color: ${C.surface}; color: ${C.text}; }
+[data-wi-ui] details > summary { list-style: none; }
+[data-wi-ui] details > summary::-webkit-details-marker { display: none; }
 [data-wi-ui] textarea, [data-wi-ui] input:not([type=checkbox]) { border-radius: 12px; }
 [data-wi-ui] :is(button, input, select, textarea, a, summary, [tabindex]):focus-visible { outline: 2px solid ${C.accent}; outline-offset: 3px; }
 [data-wi-ui] button:disabled { opacity: .45; cursor: not-allowed !important; }
-[data-wi-ui] .wi-btn, [data-wi-ui] .wi-card, [data-wi-ui] .wi-seg-btn { translate: 0px 0px; scale: 1; rotate: 0deg; transition: translate .16s ease, scale .16s ease, background .16s ease, box-shadow .16s ease; }
+[data-wi-ui] .wi-btn, [data-wi-ui] .wi-card, [data-wi-ui] .wi-seg-btn { translate: 0px 0px; scale: 1; rotate: 0deg; transition: translate .16s ease, scale .16s ease, background .16s ease, box-shadow .16s ease, border-color .16s ease; }
 @media (hover: hover) {
   [data-wi-ui] .wi-btn:not(:disabled):hover { translate: 0px -1px; }
-  [data-wi-ui] .wi-card:hover { translate: 0px -2px; box-shadow: ${C.cardShadowHover} !important; }
+  [data-wi-ui] .wi-card:hover { translate: 0px -2px; box-shadow: ${C.cardShadowHover} !important; border-color: ${C.borderStrong} !important; }
 }
 [data-wi-ui] .wi-btn:not(:disabled):active, [data-wi-ui] .wi-seg-btn:active { scale: .96; }
-[data-wi-ui] .wi-check { appearance: none; position: relative; border-radius: 9999px; background: ${C.surface}; border: 1px solid ${C.borderStrong}; box-shadow: ${C.pillShadow}; }
+[data-wi-ui] .wi-check { appearance: none; position: relative; border-radius: 9999px; background: ${C.surface}; border: 1px solid ${C.borderStrong}; box-shadow: ${C.pillShadow}; transition: background .15s ease, border-color .15s ease, scale .12s ease; }
 [data-wi-ui] .wi-check:checked { background: ${C.primaryBg}; border-color: ${C.primaryBg}; }
 [data-wi-ui] .wi-check:checked::after { content: ''; position: absolute; left: 7px; top: 4px; width: 5px; height: 9px; border: solid ${C.primaryFg}; border-width: 0 2px 2px 0; rotate: 45deg; }
 [data-wi-ui] .wi-well { background: linear-gradient(165deg var(--wi-oklab), ${C.surface} 0%, ${C.bg2} 100%) !important; }
@@ -352,9 +403,10 @@
 
   function makeGroupSelect(onChange) {
     const select = h("select", {
-      flex: "1", "min-width": "130px", padding: "7px 9px", "border-radius": "8px",
-      border: `1px solid ${C.border}`, background: C.bg2, color: C.text, "font-size": "13px",
+      "min-width": "104px", "max-width": "180px", padding: "5px 26px 5px 12px", "border-radius": "9999px",
+      border: `1px solid ${C.borderStrong}`, background: C.surface, color: C.text, "font-size": "12px",
     });
+    select.className = "wi-select-pill";
     const render = () => {
       const valid = groupsCache.some((g) => g.id === selectedSaveGroup);
       select.replaceChildren(...groupsCache.map((g) => h("option", { value: g.id }, g.name)));
@@ -1544,7 +1596,7 @@
     return base ? base + "/userscript.user.js" : "";
   };
   const SCRIPT_VERSION =
-    (typeof GM_info !== "undefined" && GM_info.script && GM_info.script.version) || "0.9.3";
+    (typeof GM_info !== "undefined" && GM_info.script && GM_info.script.version) || "0.9.4";
   let versionCache = null;
 
   function renderVersionFooter(el, v) {
@@ -1717,11 +1769,7 @@
     const panel = overlay.lastChild;
     currentTab = key;
     for (const [k, b] of Object.entries(tabButtons)) {
-      b.style.color = k === key ? C.text : C.sub;
-      b.style.background = k === key ? C.surface : "transparent";
-      b.style.fontWeight = k === key ? "600" : "500";
-      b.style.boxShadow = k === key ? C.pillShadow : "none";
-      b.setAttribute("aria-pressed", String(k === key));
+      paintSegBtn(b, k === key);
     }
     const body = panel._state.body;
     disposeGroupListeners(body);
@@ -1763,7 +1811,7 @@
   };
   let upBatchDom = null;
   const batchSaveState = {
-    draft: "", open: GM_getValue("batch_save_open", false),
+    draft: "", open: false,
     running: false, checking: false, cancel: false, aborted: false,
     total: 0, done: 0, ok: 0, fail: 0, skipped: 0,
     results: [], status: "", summary: "", error: "",
@@ -2192,11 +2240,11 @@
     const groupSelect = makeGroupSelect();
     const ta = h("textarea", {
       width: "100%", "box-sizing": "border-box", padding: "8px 10px",
-      "border-radius": "8px", border: `1px solid ${C.border}`,
-      background: C.bg, color: C.text, "font-size": "12px", resize: "vertical",
-      "font-family": "inherit", "line-height": "1.5", "min-height": "96px",
+      "border-radius": "12px", border: `1px solid ${C.border}`,
+      background: C.surface, color: C.text, "font-size": "12px", resize: "vertical",
+      "font-family": "inherit", "line-height": "1.5", "min-height": "84px",
     });
-    ta.rows = 5;
+    ta.rows = 4;
     ta.placeholder = "每行一个网址,可混排网页和 B 站视频;也支持裸 BV 号。\nhttps://example.com/article\nhttps://www.bilibili.com/video/BV1xx411c7mD";
     ta.value = st.draft;
     ta.addEventListener("input", () => { st.draft = ta.value; paintBatchSave(); });
@@ -2212,56 +2260,55 @@
       ta.value = "";
       paintBatchSave();
     });
-    const status = h("div", { "font-size": "12px", color: C.sub, "margin-top": "8px", "min-height": "18px" });
-    const report = h("div", { "margin-top": "4px", "max-height": "180px", overflow: "auto" });
+    const status = h("div", { "font-size": "12px", color: C.sub, "margin-top": "6px", "min-height": "16px" });
+    const report = h("div", { "margin-top": "4px", "max-height": "160px", overflow: "auto" });
 
-    const body = h("div", { "margin-top": "8px" },
+    const body = h("div", { "margin-top": "10px" },
       ta,
-      h("div", { display: "flex", "align-items": "center", gap: "8px", "margin-top": "8px", "font-size": "12px", color: C.sub },
-        h("span", {}, "保存到分组"), groupSelect),
-      h("div", { display: "flex", gap: "8px", "margin-top": "8px", "flex-wrap": "wrap" }, startBtn, stopBtn, clearBtn),
-      h("div", { "font-size": "11px", color: C.sub, "margin-top": "6px" },
-        `普通网页提取正文,B站普通视频抓字幕;重复网址自动去重,单次最多 ${BATCH_SAVE_MAX} 条。`),
-      h("div", { "font-size": "11px", color: C.sub, "margin-top": "4px" },
-        "批量抓取会以当前浏览器身份访问目标网页(可能携带该站 Cookie),请只粘贴可信网址。"),
+      h("div", { display: "flex", "align-items": "center", "justify-content": "space-between", gap: "8px", "margin-top": "8px", "flex-wrap": "wrap" },
+        h("div", { display: "inline-flex", "align-items": "center", gap: "6px", "font-size": "12px", color: C.sub },
+          h("span", {}, "保存到分组"), groupSelect),
+        h("div", { display: "flex", gap: "6px", "flex-wrap": "wrap" }, startBtn, stopBtn, clearBtn)),
+      h("div", { "font-size": "11px", color: C.muted, "margin-top": "6px" },
+        `普通网页提取正文,B站视频抓字幕;重复网址自动去重,单次最多 ${BATCH_SAVE_MAX} 条。`),
       status, report,
     );
+    const arrowHint = h("span", { "font-size": "11px", color: C.sub, "font-weight": "500" }, st.open ? "收起 ▴" : "展开 ▾");
     const root = h("details", {
-      "margin-top": "14px", padding: "12px", background: C.card, border: `1px solid ${C.border}`, "border-radius": "18px",
-    }, h("summary", { cursor: "pointer", "font-weight": "600", "font-size": "13px" },
-      "批量保存多个网址(网页正文 / B站字幕)"), body);
-    root.open = !!st.open;
+      padding: "10px 14px", background: C.card, border: `1px solid ${C.border}`, "border-radius": "16px",
+    }, h("summary", {
+      cursor: "pointer", "font-weight": "600", "font-size": "12.5px",
+      display: "flex", "align-items": "center", "justify-content": "space-between",
+    }, h("span", {}, "批量保存多个网址(网页正文 / B站字幕)"), arrowHint), body);
+    root.open = !!(st.open || st.running || st.checking);
     root.addEventListener("toggle", () => {
       st.open = root.open;
-      try { GM_setValue("batch_save_open", st.open); } catch { /* 忽略存储失败 */ }
+      arrowHint.textContent = root.open ? "收起 ▴" : "展开 ▾";
     });
     batchSaveDom = { root, ta, groupSelect, startBtn, stopBtn, clearBtn, status, report };
     paintBatchSave();
     return root;
   }
 
-  function buildSaveTab(body) {
+  function buildSaveTab(outerBody) {
     const card = bento();
-    body.append(card);
-    body = card;
+    outerBody.append(card);
+    const body = card;
     const vp = getBiliVideoPage(); // 普通视频页(BV/av):提供字幕/评论抓取
     const space = getBiliSpacePage(); // UP 主空间页:提供按时间范围批量抓字幕
     const bili = isBiliPage();
     const groupSelect = makeGroupSelect();
-    const titleInput = h("input", {
-      width: "100%", "box-sizing": "border-box", padding: "8px 10px",
-      "border-radius": "12px", border: `1px solid ${C.border}`,
-      background: C.bg2, color: C.text, "font-size": "14px",
-    });
-    titleInput.value = document.title.trim();
+    const titleInput = mkInput(document.title.trim(), "输入或修改保存标题");
+    titleInput.style.setProperty("background", C.surface);
 
     const preview = h("div", {
-      "margin-top": "10px", "max-height": "300px", overflow: "auto",
-      padding: "10px", background: C.surface, "border-radius": "12px",
-      "white-space": "pre-wrap", "font-size": "13px", color: C.sub,
+      "margin-top": "10px", "max-height": "140px", "min-height": "54px", overflow: "auto",
+      padding: "9px 11px", background: C.surface, border: `1px solid ${C.border}`, "border-radius": "12px",
+      "white-space": "pre-wrap", "font-size": "12px", "line-height": "1.5", color: C.sub,
     }, vp
       ? "「保存字幕」抓取 CC/AI 字幕,「保存评论」按热度抓前 100 条;抓到后自动保存进收集箱。"
       : "点「保存到收集箱」会自动提取正文并保存,无需先预览;也可先「提取正文预览」查看。");
+    preview.className = "wi-well";
 
     // 视频页动作:抓取 → 直接保存;用户改过标题则沿用,否则用「视频名 · 字幕/热门评论」
     async function runBiliAction(btn, label, busy, action) {
@@ -2324,15 +2371,15 @@
     if (space) {
       const linkBtn = mkBtn("仅存链接", undefined, false, () => saveLink(linkBtn));
       body.append(
-        h("div", { "font-weight": "600", "font-size": "14px" }, "B站 UP 主主页"),
+        h("div", { "font-weight": "600", "font-size": "13.5px" }, "B站 UP 主主页"),
         h("div", { "margin-top": "4px", "font-size": "12px", color: C.sub },
           "按时间范围批量抓取该 UP 主的投稿视频字幕;普通网页/B站视频的批量保存也在下方。"),
-        h("div", { display: "flex", gap: "8px", "align-items": "center", "margin-top": "10px", "flex-wrap": "wrap" },
-          h("span", { "font-size": "12px", color: C.sub }, "保存到分组"), groupSelect),
-        h("div", { display: "flex", gap: "8px", "margin-top": "10px", "flex-wrap": "wrap" }, linkBtn),
-        buildUpBatchSection(space),
-        buildBatchSaveSection(),
+        h("div", { display: "flex", "align-items": "center", "justify-content": "space-between", gap: "8px", "margin-top": "10px", "flex-wrap": "wrap" },
+          h("div", { display: "inline-flex", "align-items": "center", gap: "6px" },
+            h("span", { "font-size": "12px", color: C.sub }, "保存到分组"), groupSelect),
+          linkBtn),
       );
+      outerBody.append(buildUpBatchSection(space), buildBatchSaveSection());
       return;
     }
 
@@ -2343,16 +2390,19 @@
         () => runBiliAction(cmtBtn, "保存评论", "⏳ 抓取评论中", (prog) => saveBiliComments(vp, 100, prog)));
       const linkBtn = mkBtn("仅存链接", undefined, false, () => saveLink(linkBtn));
       body.append(
-        h("div", { "font-weight": "600", "margin-bottom": "8px" }, "标题"),
+        h("div", { display: "flex", "align-items": "center", "justify-content": "space-between", "margin-bottom": "6px" },
+          h("span", { "font-weight": "600", "font-size": "12.5px", color: C.sub }, "标题"),
+          h("span", { "font-size": "11px", color: C.muted }, location.hostname)),
         titleInput,
-        h("div", { display: "flex", gap: "8px", "align-items": "center", "margin-top": "10px" },
-          h("span", { "font-size": "12px", color: C.sub }, "保存到分组"), groupSelect),
-        h("div", { display: "flex", gap: "8px", "margin-top": "10px", "flex-wrap": "wrap" }, subBtn, cmtBtn, linkBtn),
+        h("div", { display: "flex", "align-items": "center", "justify-content": "space-between", gap: "8px", "margin-top": "10px", "flex-wrap": "wrap" },
+          h("div", { display: "inline-flex", "align-items": "center", gap: "6px" },
+            h("span", { "font-size": "12px", color: C.sub }, "保存到分组"), groupSelect),
+          h("div", { display: "flex", gap: "6px", "flex-wrap": "wrap" }, subBtn, cmtBtn, linkBtn)),
         preview,
-        h("div", { "margin-top": "10px", "font-size": "12px", color: C.sub },
-          "检测到 B 站视频页:字幕/评论直接抓进收集箱,双端可看、可生成 AI 总结;「仅存链接」保持原行为,由 PC 归档脚本处理。AI 字幕需要在浏览器登录 B 站。"),
-        buildBatchSaveSection(),
+        h("div", { "margin-top": "8px", "font-size": "11px", color: C.muted },
+          "检测到 B 站视频页:字幕/评论直接抓进收集箱,可生成 AI 总结;AI 字幕需登录 B 站。"),
       );
+      outerBody.append(buildBatchSaveSection());
       return;
     }
 
@@ -2406,22 +2456,24 @@
       saveBtn.textContent = "保存到收集箱";
     });
 
-    const hint = h("div", { "margin-top": "10px", "font-size": "12px", color: C.sub },
+    const hint = h("div", { "margin-top": "8px", "font-size": "11px", color: C.muted },
       bili
         ? "检测到 B 站页面(番剧/短链等):只保存链接,PC 归档脚本会自动下载字幕并生成总结。"
-        : "保存的是自动提取的正文(Readability),不是整个页面;PC 归档脚本会把它落盘为 markdown。");
+        : "自动提取网页正文(Readability)并落盘为 Markdown。");
 
     body.append(
-      h("div", { "font-weight": "600", "margin-bottom": "8px" }, "标题"),
+      h("div", { display: "flex", "align-items": "center", "justify-content": "space-between", "margin-bottom": "6px" },
+        h("span", { "font-weight": "600", "font-size": "12.5px", color: C.sub }, "标题"),
+        h("span", { "font-size": "11px", color: C.muted }, location.hostname)),
       titleInput,
-      h("div", { display: "flex", gap: "8px", "align-items": "center", "margin-top": "10px" },
-        h("span", { "font-size": "12px", color: C.sub }, "保存到分组"), groupSelect),
-      bili ? "" : h("div", { display: "flex", gap: "8px", "margin-top": "10px", "flex-wrap": "wrap" }, saveBtn, extractBtn),
-      bili ? h("div", { "margin-top": "10px" }, saveBtn) : "",
+      h("div", { display: "flex", "align-items": "center", "justify-content": "space-between", gap: "8px", "margin-top": "10px", "flex-wrap": "wrap" },
+        h("div", { display: "inline-flex", "align-items": "center", gap: "6px" },
+          h("span", { "font-size": "12px", color: C.sub }, "保存到分组"), groupSelect),
+        bili ? saveBtn : h("div", { display: "flex", gap: "6px", "flex-wrap": "wrap" }, extractBtn, saveBtn)),
       preview,
       hint,
-      buildBatchSaveSection(),
     );
+    outerBody.append(buildBatchSaveSection());
   }
 
   // ---- Tab: 已保存列表 ----
@@ -2445,17 +2497,13 @@
 
   function buildListTab(body) {
     const connectionVersion = savedConnectionVersion;
-    // 常驻批量栏:未选择时按钮置灰而不是隐藏,避免出现/消失导致列表跳动
-    // 半透明 + backdrop-filter 毛玻璃:内容从栏下滑过时被虚化;底色由 C.bg 派生跟随调色板
-    // 滚动区顶部内边距已在 switchTab 归零,栏钉住时从可见顶边盖住,不会露缝
-    // 左右负 margin 让栏背景铺满整个面板宽度,与下方内容的 14px 内边距对齐
-    // prefers-reduced-transparency:开启时退化为实心底色、不做模糊
+    // 按需浮现的批量操作栏:0 项选中时隐藏(display:none),不挤占顶部空间;勾选后以毛玻璃胶囊栏吸顶浮现
     const bar = h("div", {
-      display: "flex", position: "sticky", top: "0", "z-index": "3",
-      background: REDUCE_TRANSPARENCY ? C.bg : rgbaOf(C.bg, 0.82),
-      padding: "7px 12px", margin: "4px 0 10px", "border-radius": "14px",
-      border: `1px solid ${C.borderStrong}`,
-      "align-items": "center", gap: "8px", "flex-wrap": "wrap",
+      display: "none", position: "sticky", top: "6px", "z-index": "5",
+      background: REDUCE_TRANSPARENCY ? C.surface : rgbaOf(C.surface, 0.92),
+      padding: "7px 10px", margin: "0 0 10px", "border-radius": "16px",
+      border: `1px solid ${C.borderStrong}`, "box-shadow": C.cardShadowHover,
+      "align-items": "center", gap: "6px", "flex-wrap": "wrap",
     });
     if (!REDUCE_TRANSPARENCY) {
       bar.style.setProperty("backdrop-filter", "blur(14px)");
@@ -2464,34 +2512,67 @@
     const reportEl = h("div");
     const listEl = h("div");
     const viewButtons = {};
-    const viewToggle = h("div", { display: "flex", padding: "3px", gap: "2px", background: C.bg2, "border-radius": "9999px" });
+    const viewToggle = mkTrack();
+    const paintViewToggle = () => {
+      for (const [v, b] of Object.entries(viewButtons)) paintSegBtn(b, v === savedListView);
+    };
     for (const [view, label] of [["grid", "Grid"], ["list", "List"]]) {
-      const b = mkBtn(label, () => {
+      const b = mkSegBtn(label, view, () => {
         savedListView = view;
         GM_setValue("saved_list_view_v1", view);
+        paintViewToggle();
         renderList();
       });
-      b.prepend ? b.prepend(svgIcon(view)) : b.append(svgIcon(view));
       b.setAttribute("aria-label", view === "grid" ? "双列卡片视图" : "紧凑列表视图");
       viewButtons[view] = b;
       viewToggle.append(b);
     }
-    const loadStatus = h("div", { "font-size": "12px", color: C.sub, "margin-bottom": "6px" });
+    paintViewToggle();
+
+    const loadStatus = h("span", { "font-size": "11px", color: C.muted, "white-space": "nowrap" });
     loadStatus.setAttribute("role", "status");
     loadStatus.setAttribute("aria-live", "polite");
-    const controls = h("div", { display: "flex", gap: "8px", "align-items": "center", "flex-wrap": "wrap", padding: "10px 0 6px" });
-    const searchInput = mkInput(savedListQuery, "搜索标题或网站");
-    searchInput.style.setProperty("flex", "1");
-    searchInput.style.setProperty("border-radius", "9999px");
-    searchInput.setAttribute("aria-label", "搜索标题或网站");
-    searchInput.style.setProperty("min-width", "150px");
-    const refreshBtn = mkBtn("刷新", () => refreshItems(true));
-    const groupFilter = h("select", {
-      "min-width": "120px", "max-width": "100%", padding: "7px 9px", "border-radius": "8px",
-      border: `1px solid ${C.border}`, background: C.bg2, color: C.text, "font-size": "13px",
+
+    // Row 1: 胶囊搜索框(带放大镜图标) + Grid/List 分段切换器
+    const controls = h("div", { display: "flex", gap: "8px", "align-items": "center", padding: "10px 0 6px" });
+    const searchInput = h("input", {
+      width: "100%", border: "none", outline: "none", background: "transparent",
+      color: C.text, "font-size": "12.5px", padding: "2px 0",
     });
-    const groupManager = h("details", { "margin-bottom": "8px", padding: "8px", background: C.bg2, "border-radius": "8px" },
-      h("summary", { cursor: "pointer", "font-weight": "600", "font-size": "13px" }, "管理分组"),
+    searchInput.value = savedListQuery || "";
+    searchInput.placeholder = "搜索标题或网站";
+    searchInput.setAttribute("aria-label", "搜索标题或网站");
+    const searchWrap = h("div", {
+      flex: "1", "min-width": "140px", display: "flex", "align-items": "center", gap: "7px",
+      padding: "5px 12px", "border-radius": "9999px", background: C.bg2,
+      border: `1px solid ${C.border}`,
+      transition: "border-color .15s ease, background .15s ease, box-shadow .15s ease",
+    }, h("span", { color: C.muted, display: "inline-flex" }, svgIcon("search", 14)), searchInput);
+    searchInput.addEventListener("focus", () => {
+      searchWrap.style.setProperty("border-color", C.borderStrong);
+      searchWrap.style.setProperty("background", C.surface);
+      searchWrap.style.setProperty("box-shadow", "0 0 0 3px " + C.accentSoft);
+    });
+    searchInput.addEventListener("blur", () => {
+      searchWrap.style.setProperty("border-color", C.border);
+      searchWrap.style.setProperty("background", C.bg2);
+      searchWrap.style.setProperty("box-shadow", "");
+    });
+    controls.append(searchWrap, viewToggle);
+
+    // Row 2: 左侧 [全部分组 ▾] [分组管理] [全选] | 右侧 [状态文本] [↻ 刷新]
+    const refreshBtn = mkBtn("刷新", () => refreshItems(true));
+    refreshBtn.prepend ? refreshBtn.prepend(svgIcon("refresh", 12)) : refreshBtn.append(svgIcon("refresh", 12));
+    const groupFilter = h("select", {
+      "min-width": "104px", "max-width": "170px", padding: "5px 26px 5px 12px", "border-radius": "9999px",
+      border: `1px solid ${C.borderStrong}`, background: C.surface, color: C.text, "font-size": "12px",
+    });
+    groupFilter.className = "wi-select-pill";
+    const groupManager = h("details", {
+      display: "none", "margin-bottom": "10px", padding: "10px 12px",
+      background: C.card, border: `1px solid ${C.border}`, "border-radius": "16px",
+    },
+      h("summary", { display: "none" }, "管理分组"),
       renderGroupManager((groups) => {
         const valid = new Set(groups.map((g) => g.id));
         items = items.map((it) => valid.has(it.group_id || "default") ? it : { ...it, group_id: "default" });
@@ -2500,10 +2581,31 @@
         renderList();
       }),
     );
-    controls.append(searchInput, viewToggle, refreshBtn);
-    const filters = h("div", { display: "flex", gap: "8px", "margin-bottom": "8px", "align-items": "center" });
-    filters.append(groupFilter, mkBtn("分组管理", () => { groupManager.open = !groupManager.open; }));
-    body.append(controls, filters, groupManager, loadStatus, bar, reportEl, listEl);
+    const mgrBtn = mkBtn("分组管理", () => {
+      groupManager.open = !groupManager.open;
+      groupManager.style.setProperty("display", groupManager.open ? "block" : "none");
+      mgrBtn.style.setProperty("border-color", groupManager.open ? C.primaryBg : C.borderStrong);
+    });
+    mgrBtn.prepend ? mgrBtn.prepend(svgIcon("tag", 12)) : mgrBtn.append(svgIcon("tag", 12));
+    const selectAllBtn = mkBtn("全选", () => {
+      const visible = visibleItems();
+      if (!visible.length || batchBusy) return;
+      const allChecked = visible.every((it) => selectedIds.has(it.id));
+      for (const it of visible) {
+        if (allChecked) selectedIds.delete(it.id);
+        else selectedIds.add(it.id);
+      }
+      renderList();
+      renderBar();
+    });
+    const filters = h("div", {
+      display: "flex", gap: "6px", "margin-bottom": "8px", "align-items": "center",
+      "justify-content": "space-between", "flex-wrap": "wrap",
+    },
+      h("div", { display: "flex", gap: "6px", "align-items": "center", "flex-wrap": "wrap" }, groupFilter, mgrBtn, selectAllBtn),
+      h("div", { display: "flex", gap: "6px", "align-items": "center", "margin-left": "auto" }, loadStatus, refreshBtn),
+    );
+    body.append(controls, filters, groupManager, bar, reportEl, listEl);
     let items = [];
     let selectedGroup = savedListGroup;
     const barButtons = {};
@@ -2565,7 +2667,10 @@
             listEl.replaceChildren(h("div", { color: C.danger, padding: "20px", "text-align": "center" }, "加载失败: " + e.message));
           } else if (manual) toast("刷新失败: " + e.message, true);
         })
-        .finally(() => { refreshBtn.disabled = false; refreshBtn.textContent = "刷新"; });
+        .finally(() => {
+          refreshBtn.disabled = false;
+          refreshBtn.replaceChildren(svgIcon("refresh", 12), "刷新");
+        });
     }
 
     groupFilter.addEventListener("change", () => {
@@ -2622,19 +2727,15 @@
       listEl.style.setProperty("grid-template-columns", "repeat(2, minmax(0, 1fr))");
       listEl.style.setProperty("flex-direction", "column");
       listEl.style.setProperty("gap", savedListView === "grid" ? "10px" : "8px");
-      for (const [view, b] of Object.entries(viewButtons)) {
-        b.style.background = view === savedListView ? C.surface : "transparent";
-        b.style.boxShadow = view === savedListView ? C.pillShadow : "none";
-        b.setAttribute("aria-pressed", String(view === savedListView));
-      }
+      paintViewToggle();
       listEl.replaceChildren();
       if (!items.length) {
-        listEl.append(h("div", { color: C.sub, padding: "20px", "text-align": "center" }, "还没有保存过内容"));
+        listEl.append(h("div", { color: C.sub, padding: "24px", "text-align": "center" }, "还没有保存过内容"));
         return;
       }
       const visible = visibleItems();
       if (!visible.length) {
-        listEl.append(h("div", { color: C.sub, padding: "20px", "text-align": "center" },
+        listEl.append(h("div", { color: C.sub, padding: "24px", "text-align": "center" },
           "没有匹配的资料", h("div", { "margin-top": "4px", "font-size": "12px" }, "试试其他关键词或切换分组")));
         return;
       }
@@ -2643,13 +2744,22 @@
 
     function renderBar() {
       bar.replaceChildren();
-      const n = visibleItems().filter((it) => selectedIds.has(it.id)).length;
+      const visible = visibleItems();
+      const n = visible.filter((it) => selectedIds.has(it.id)).length;
+      const allChecked = visible.length > 0 && n === visible.length;
+      selectAllBtn.textContent = allChecked ? "取消全选" : "全选";
+      selectAllBtn.disabled = batchBusy || !visible.length;
+      // 0 项选中且无进行中任务时收起批量操作栏,把视觉重心完全留给资料卡片
+      const showBar = n > 0 || batchBusy || moveMode;
+      bar.style.setProperty("display", showBar ? "flex" : "none");
       bar.append(h("div", {
-        color: n ? C.accent : C.sub, "font-size": "13px", "font-weight": "600",
+        padding: "3px 9px", "border-radius": "9999px",
+        background: n ? C.primaryBg : C.bg2, color: n ? C.primaryFg : C.sub,
+        "font-size": "11.5px", "font-weight": "600",
       }, n ? `已选 ${n} 项` : "批量操作"));
 
-      const visible = visibleItems();
-      const allBox = mkCheckbox(visible.length > 0 && visible.every((it) => selectedIds.has(it.id)));
+      const allBox = mkCheckbox(allChecked);
+      allBox.style.setProperty("margin", "0");
       allBox.disabled = batchBusy || !visible.length;
       allBox.addEventListener("change", () => {
         for (const it of visible) {
@@ -2660,16 +2770,17 @@
         renderBar();
       });
       bar.append(h("label", {
-        display: "flex", "align-items": "center", gap: "4px",
+        display: "inline-flex", "align-items": "center", gap: "5px",
         "font-size": "12px", color: C.sub, cursor: allBox.disabled ? "default" : "pointer",
       }, allBox, "全选"));
 
       // 移动到分组的内联选择态:点「移动到分组」后,批量栏临时变成 [分组选择|确定|取消]
       if (moveMode) {
         const sel = h("select", {
-          flex: "1", "min-width": "120px", padding: "6px", "border-radius": "8px",
-          border: `1px solid ${C.border}`, background: C.bg2, color: C.text, "font-size": "13px",
+          flex: "1", "min-width": "110px", padding: "5px 26px 5px 12px", "border-radius": "9999px",
+          border: `1px solid ${C.borderStrong}`, background: C.surface, color: C.text, "font-size": "12px",
         });
+        sel.className = "wi-select-pill";
         sel.append(h("option", { value: "default" }, "默认"));
         for (const g of groupsCache.filter((x) => !x.builtin)) sel.append(h("option", { value: g.id }, g.name));
         const okBtn = mkBtn("确定", C.accent, true, () => batchMoveConfirm(sel.value));
@@ -2680,15 +2791,15 @@
       }
 
       const defs = [
-        ["sum", "AI 总结", undefined, batchSummarize],
-        ["chat", "就这些聊", C.accent, batchChat],
-        ["move", "移动到分组", undefined, batchMoveStart],
-        ["dl", "下载 .md", undefined, batchDownload],
-        ["del", "删除", C.danger, batchDelete],
-        ["cancel", "取消选择", undefined, clearSelection],
+        ["sum", "AI 总结", undefined, true, batchSummarize],
+        ["chat", "就这些聊", C.accent, false, batchChat],
+        ["move", "移动到分组", undefined, false, batchMoveStart],
+        ["dl", "下载 .md", undefined, false, batchDownload],
+        ["del", "删除", C.danger, false, batchDelete],
+        ["cancel", "取消选择", undefined, false, clearSelection],
       ];
-      for (const [key, label, color, fn] of defs) {
-        const b = mkBtn(label, color, false, fn);
+      for (const [key, label, color, primary, fn] of defs) {
+        const b = mkBtn(label, color, primary, fn);
         b.disabled = batchBusy || n === 0;
         b.style.opacity = b.disabled ? "0.55" : "";
         barButtons[key] = b;
@@ -2890,44 +3001,100 @@
 
   function renderListItem(it, onChange) {
     const grid = savedListView === "grid";
+    const isBili = it.type === "bilibili";
     const date = new Date(it.created_at).toLocaleDateString("zh-CN");
     const groupName = groupsCache.find((g) => g.id === (it.group_id || "default"))?.name || "默认";
-    const badges = h("span", { display: "flex", gap: "3px", "flex-wrap": "wrap", "justify-content": "flex-end" });
-    for (const label of [it.type === "bilibili" && "B站", it.has_summary && "已总结", it.status === "archived" && "已归档"].filter(Boolean)) {
-      badges.append(h("span", { "font-size": "10px", padding: "2px 6px", "border-radius": "9999px", background: C.bg2, color: C.sub }, label));
+    const badges = h("span", { display: "inline-flex", gap: "4px", "flex-wrap": "wrap", "justify-content": "flex-end", "align-items": "center" });
+    const primaryTag = it.has_summary ? "✨ 已总结" : (isBili ? "📺 字幕" : (it.has_content ? "📄 正文" : "🔗 链接"));
+    for (const label of [primaryTag, it.status === "archived" && "✅ 已归档"].filter(Boolean)) {
+      badges.append(h("span", {
+        "font-size": "10.5px", "font-weight": "500", padding: "2px 7px", "border-radius": "9999px",
+        background: C.surface, border: `1px solid ${C.border}`, color: C.sub,
+      }, label));
     }
     const cb = mkCheckbox(selectedIds.has(it.id));
+    cb.style.setProperty("margin", "0");
     cb.setAttribute("aria-label", "选择 " + it.title);
     cb.addEventListener("click", (e) => e.stopPropagation());
-    const row = h("div", { display: "flex", "flex-direction": grid ? "column" : "row", gap: grid ? "0" : "10px",
-      padding: grid ? "8px" : "10px 12px", "border-radius": grid ? "18px" : "14px", background: C.card,
+    const row = h("div", {
+      display: "flex", "flex-direction": grid ? "column" : "row",
+      "justify-content": "space-between", "align-items": grid ? "stretch" : "center",
+      gap: grid ? "0" : "10px",
+      padding: grid ? "8px" : "9px 12px", "border-radius": grid ? "18px" : "14px", background: C.card,
       border: `1px solid ${selectedIds.has(it.id) ? C.primaryBg : C.border}`, "box-shadow": C.cardShadow,
-      "min-width": "0", cursor: "pointer" });
+      "min-width": "0", cursor: "pointer",
+    });
     row.className = "wi-card";
     cb.addEventListener("change", () => {
       if (cb.checked) selectedIds.add(it.id); else selectedIds.delete(it.id);
       row.style.setProperty("border-color", cb.checked ? C.primaryBg : C.border);
       onChange();
     });
-    const title = h("div", { "font-weight": "600", "font-size": "13px", "line-height": "1.4", display: "-webkit-box",
-      "-webkit-line-clamp": "2", "-webkit-box-orient": "vertical", overflow: "hidden", "overflow-wrap": "anywhere" }, it.title);
-    const link = h("a", { target: "_blank", rel: "noopener noreferrer", color: C.sub, display: "inline-flex", padding: "3px" }, svgIcon("external", 13));
+    const link = h("a", {
+      target: "_blank", rel: "noopener noreferrer", color: C.muted,
+      display: "inline-flex", "align-items": "center", padding: "3px", "flex-shrink": "0",
+    }, svgIcon("external", 12));
     if (/^https?:\/\//i.test(it.url || "")) link.href = it.url;
     link.setAttribute("aria-label", "打开原文: " + it.title);
     link.addEventListener("click", (e) => e.stopPropagation());
-    const textBlock = h("div", { padding: grid ? "8px 4px 2px" : "0", "min-width": "0", flex: "1" }, title,
-      h("div", { display: "flex", "align-items": "center", gap: "4px", color: C.sub, "font-size": "11px" },
-        h("span", { overflow: "hidden", "text-overflow": "ellipsis", "white-space": "nowrap" }, it.site), link));
+
+    const siteBadge = h("span", {
+      width: grid ? "16px" : "24px", height: grid ? "16px" : "24px",
+      "border-radius": grid ? "5px" : "7px",
+      display: "inline-flex", "align-items": "center", "justify-content": "center", "flex-shrink": "0",
+      background: isBili ? "rgba(14,165,233,0.12)" : "rgba(99,102,241,0.12)",
+      color: isBili ? "#0ea5e9" : "#6366f1",
+    }, svgIcon(isBili ? "tv" : "file", grid ? 10 : 12));
+
     if (grid) {
-      const well = h("div", { padding: "9px 10px", "border-radius": "11px", background: C.surface, border: `1px solid ${C.border}`,
-        "min-height": "68px", display: "flex", "flex-direction": "column", "justify-content": "space-between", gap: "6px" },
-        h("div", { display: "flex", "align-items": "center", "justify-content": "space-between" }, cb, badges),
-        h("div", { "font-size": "11px", color: C.sub, "overflow-wrap": "anywhere" }, `${groupName} · ${date}`));
+      const cleanSummary = it.summary
+        ? String(it.summary).replace(/^#+\s*.*$/gm, "").replace(/\s+/g, " ").trim()
+        : "";
+      const snippetText = cleanSummary || `${groupName} · ${date} · ${it.url || it.site}`;
+      const snippetEl = h("div", {
+        "font-size": "11.5px", "line-height": "1.42", color: C.sub,
+        display: "-webkit-box", "-webkit-line-clamp": "2", "-webkit-box-orient": "vertical",
+        overflow: "hidden", "overflow-wrap": "anywhere",
+      }, snippetText);
+      const well = h("div", {
+        padding: "9px 10px", "border-radius": "11px", background: C.surface, border: `1px solid ${C.border}`,
+        "min-height": "72px", display: "flex", "flex-direction": "column", "justify-content": "space-between", gap: "6px",
+      },
+        h("div", { display: "flex", "align-items": "center", "justify-content": "space-between", gap: "6px" }, cb, badges),
+        snippetEl,
+      );
       well.className = "wi-well";
+      row._wellSnippet = snippetEl;
+
+      const title = h("div", {
+        "font-weight": "600", "font-size": "12.5px", "line-height": "1.38", color: C.text,
+        display: "-webkit-box", "-webkit-line-clamp": "2", "-webkit-box-orient": "vertical",
+        overflow: "hidden", "overflow-wrap": "anywhere", flex: "1",
+      }, it.title);
+      const moreIcon = h("span", { color: C.muted, "flex-shrink": "0", "margin-top": "1px", display: "inline-flex" }, svgIcon("more", 14));
+      const textBlock = h("div", {
+        padding: "8px 4px 2px", "min-width": "0", flex: "1",
+        display: "flex", "flex-direction": "column", "justify-content": "space-between",
+      },
+        h("div", { display: "flex", "align-items": "flex-start", "justify-content": "space-between", gap: "6px" }, title, moreIcon),
+        h("div", { "margin-top": "7px", display: "flex", "align-items": "center", "justify-content": "space-between", gap: "4px", color: C.sub, "font-size": "11px" },
+          h("div", { display: "flex", "align-items": "center", gap: "5px", "min-width": "0", overflow: "hidden" },
+            siteBadge,
+            h("span", { overflow: "hidden", "text-overflow": "ellipsis", "white-space": "nowrap" }, `${it.site} · ${groupName}`)),
+          link),
+      );
       row.append(well, textBlock);
     } else {
-      textBlock.append(h("div", { "font-size": "11px", color: C.sub }, `${groupName} · ${date}`), badges);
-      row.append(cb, textBlock);
+      const title = h("div", {
+        "font-weight": "600", "font-size": "13px", "line-height": "1.35", color: C.text,
+        overflow: "hidden", "text-overflow": "ellipsis", "white-space": "nowrap",
+      }, it.title);
+      const textBlock = h("div", { "min-width": "0", flex: "1" },
+        title,
+        h("div", { "font-size": "11px", color: C.sub, "margin-top": "2px", overflow: "hidden", "text-overflow": "ellipsis", "white-space": "nowrap" },
+          `${it.site} · ${groupName} · ${date}`),
+      );
+      row.append(cb, siteBadge, textBlock, badges, link);
     }
     row.tabIndex = 0;
     row.setAttribute("aria-label", "查看详情: " + it.title);
@@ -2950,9 +3117,11 @@
         detail._detail = true;
 
         const summaryBox = h("div", {
-          "white-space": "pre-wrap", "font-size": "13px", padding: "8px",
-          background: C.bg, "border-radius": "8px", "margin-top": "8px",
+          "white-space": "pre-wrap", "font-size": "13px", "line-height": "1.55", padding: "10px 12px",
+          background: C.bg, border: `1px solid ${C.border}`, "border-radius": "12px", "margin-top": "8px",
         }, it.summary || "(还没有总结)");
+        summaryBox.className = "wi-well";
+        if (it.summary && row._wellSnippet) row._wellSnippet.textContent = it.summary.replace(/\s+/g, " ").trim().slice(0, 90);
 
         const sumBtn = mkBtn("生成 AI 总结", async () => {
           sumBtn.disabled = true;
@@ -2962,6 +3131,7 @@
           try {
             const r = await gmFetch("POST", "/api/summarize", { id });
             summaryBox.textContent = r.summary;
+            if (r.summary && row._wellSnippet) row._wellSnippet.textContent = r.summary.replace(/\s+/g, " ").trim().slice(0, 90);
             toast("总结完成 ✓");
           } catch (e) {
             toast(e.message, true);
@@ -3080,25 +3250,24 @@
 
   function buildSettingsTab(body) {
     const { worker, token } = $storage.get();
-    const positions = h("div", { display: "flex", gap: "4px", padding: "4px", background: C.bg2, "border-radius": "9999px", "margin-top": "10px" });
+    const positions = mkTrack();
+    positions.style.setProperty("display", "flex");
+    positions.style.setProperty("margin-top", "10px");
     const positionButtons = {};
     const paintPosition = () => {
       for (const [pos, b] of Object.entries(positionButtons)) {
-        const active = $storage.get().panelPos === pos;
-        b.style.background = active ? C.surface : "transparent";
-        b.style.boxShadow = active ? C.pillShadow : "none";
-        b.setAttribute("aria-pressed", String(active));
+        paintSegBtn(b, $storage.get().panelPos === pos);
       }
     };
     for (const [pos, label] of [["center", "屏幕居中"], ["right", "靠右悬浮"]]) {
-      const b = mkBtn(label, () => {
+      const b = mkSegBtn(label, () => {
         $storage.set("panelPos", pos); applyPanelPos(panelEl); paintPosition(); toast("面板位置: " + label);
       });
       b.style.setProperty("flex", "1");
       positionButtons[pos] = b; positions.append(b);
     }
     paintPosition();
-    body.append(bento(h("div", { "font-weight": "600" }, "界面与弹出位置"), positions));
+    body.append(bento(h("div", { "font-weight": "600", "font-size": "13px" }, "界面与弹出位置"), positions));
     const field = (labelText, input) =>
       h("div", { "margin-bottom": "12px" },
         h("div", { "font-size": "12px", color: C.sub, "margin-bottom": "4px" }, labelText), input);
@@ -4538,10 +4707,40 @@
 
   // ---------- 小部件 ----------
 
+  function mkTrack(...children) {
+    return h("div", {
+      display: "inline-flex", "align-items": "center", gap: "2px",
+      padding: "3px", background: C.bg2, border: `1px solid ${C.border}`,
+      "border-radius": "9999px", "flex-shrink": "0",
+    }, ...children);
+  }
+
+  function paintSegBtn(b, active) {
+    b.style.setProperty("background", active ? C.surface : "transparent");
+    b.style.setProperty("color", active ? C.text : C.sub);
+    b.style.setProperty("font-weight", active ? "600" : "500");
+    b.style.setProperty("box-shadow", active ? C.pillShadow : "none");
+    b.setAttribute("aria-pressed", String(!!active));
+  }
+
+  function mkSegBtn(label, iconName, onClick) {
+    if (typeof iconName === "function") { onClick = iconName; iconName = null; }
+    const b = h("button", {
+      padding: "5px 11px", "border-radius": "9999px", cursor: "pointer",
+      display: "inline-flex", "align-items": "center", "justify-content": "center", gap: "5px",
+      "font-size": "12px", "font-weight": "500", border: "none",
+      background: "transparent", color: C.sub,
+      transition: "color .15s ease, background .15s ease, box-shadow .15s ease",
+    }, iconName ? svgIcon(iconName, 13) : null, label);
+    b.className = "wi-seg-btn";
+    b.addEventListener("click", onClick);
+    return b;
+  }
+
   function mkBtn(label, color, primary, onClick) {
     if (typeof color === "function") { onClick = color; color = undefined; primary = false; }
     const b = h("button", {
-      padding: "6px 14px", "border-radius": "9999px", cursor: "pointer",
+      padding: "5px 12px", "border-radius": "9999px", cursor: "pointer",
       display: "inline-flex", "align-items": "center", "justify-content": "center", gap: "5px",
       "font-size": "12px", "font-weight": "500", border: `1px solid ${primary ? "transparent" : (color || C.borderStrong)}`,
       background: primary ? (!color || color === C.accent ? C.primaryBg : color) : C.surface,
