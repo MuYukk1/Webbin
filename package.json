@@ -3,7 +3,28 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node test/routes.test.mjs && node test/chat-loop.test.mjs && node test/button-pos.test.mjs && node test/panel-tabs.test.mjs && node test/batch.test.mjs && node test/batch-ui.test.mjs && node test/saved-state.test.mjs",
-    "deploy": "wrangler deploy"
+    "test": "node test/routes.test.mjs && node test/chat-loop.test.mjs && node test/button-pos.test.mjs && node test/panel-tabs.test.mjs && node test/batch.test.mjs && node test/batch-ui.test.mjs && node test/saved-state.test.mjs && node --test test/update.test.mjs",
+    "build": "npm test",
+    "deploy": "wrangler deploy",
+    "manifest": "node scripts/update-manifest.mjs"
+  },
+  "engines": {
+    "node": ">=22.15.0"
+  },
+  "webbin": {
+    "deploymentVersion": 1
+  },
+  "cloudflare": {
+    "bindings": {
+      "TOKEN": {
+        "description": "Webbin 的访问口令。请用密码管理器生成并保存一串至少 32 位的随机字符,稍后填入油猴设置。不是 Cloudflare API Token 或 AI API Key。"
+      },
+      "KV": {
+        "description": "保存你的收藏、分组和 AI 设置,首次自动创建。已有 Webbin 用户请沿用原 KV 绑定。"
+      }
+    }
+  },
+  "devDependencies": {
+    "wrangler": "4.157.0"
   }
 }

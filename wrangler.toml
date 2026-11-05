@@ -1,6 +1,7 @@
 name = "webbin"
 main = "index.js"
 compatibility_date = "2025-01-01"
+keep_vars = true
 
 # 把 userscript/webbin.user.js 作为文本模块打进 Worker,供 /userscript.user.js 路由分发
 # (必须放在文件顶层;放进 [vars] 会被当成环境变量)
@@ -8,12 +9,11 @@ rules = [
   { type = "Text", globs = ["**/*.user.js"], fallthrough = true }
 ]
 
-# 真实值不在仓库中保存,部署时由 GitHub Action 从 Secrets 注入:
-#   __KV_ID__       → secrets.KV_NAMESPACE_ID
-#   __WORKER_TOKEN__→ secrets.WORKER_TOKEN(客户端访问用的鉴权 Token)
+# 首次部署自动创建 KV;后续部署沿用已有绑定。
+# Deploy to Cloudflare 可能会在用户的副本中补上 id,请保留该值。
 [[kv_namespaces]]
 binding = "KV"
-id = "__KV_ID__"
 
-[vars]
-TOKEN = "__WORKER_TOKEN__"
+# 值通过部署向导或 Worker Settings > Variables and Secrets 配置,不写入源码。
+[secrets]
+required = ["TOKEN"]

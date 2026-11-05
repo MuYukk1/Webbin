@@ -1,0 +1,3 @@
+# Webbin 访问口令,请填写自己生成并保存的至少 32 位随机字符串。
+# 不是 Cloudflare API Token,也不是 AI 服务的 API Key。
+TOKEN=

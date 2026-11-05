@@ -1,0 +1,61 @@
+name: 更新 Webbin
+
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: webbin-update
+  cancel-in-progress: false
+
+jobs:
+  test:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    outputs:
+      sha: ${{ steps.prepare.outputs.sha }}
+    steps:
+      - name: 读取自己的仓库
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: 准备同步并记录上游版本
+        id: prepare
+        run: node scripts/update-webbin.mjs prepare
+      - name: 安装依赖并测试
+        if: steps.prepare.outputs.sha != ''
+        run: |
+          npm ci --no-audit --no-fund
+          npm run build
+
+  publish:
+    needs: test
+    if: needs.test.outputs.sha != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - name: 重新检出触发更新时的版本
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: 核对测试版本并推送，由 Cloudflare 自动部署
+        run: node scripts/update-webbin.mjs publish
+        env:
+          WEBBIN_TESTED_SHA: ${{ needs.test.outputs.sha }}
+          WEBBIN_PUSH_TOKEN: ${{ github.token }}

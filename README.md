@@ -1,7 +1,7 @@
 <div align="center">
   <img src="assets/webbin_icon_coral.png" width="160" alt="Webbin" />
   <h1>Webbin</h1>
-  <p><strong>看到好内容，一键收进自己的知识库</strong><br/>收藏 · AI 总结 · 对话问答 · 自动归档，一站式搞定</p>
+  <p>装在浏览器里的私人稍后读与网页收集箱</p>
 
 [![Cloudflare Workers](https://img.shields.io/badge/Cloudflare-Workers-f6821f)](https://workers.cloudflare.com/)
 [![Tampermonkey](https://img.shields.io/badge/Tampermonkey-UserScript-00485b)](https://www.tampermonkey.net/)
@@ -9,157 +9,142 @@
 
 </div>
 
-## 这是什么？
+## 这是什么工具？
 
-刷到一篇好文章、一个想看的 B 站视频，但当下没时间看？**点一下右下角的 📥，内容就进了你自己的云端收集箱。**之后想怎么消化都行：
+平时上网冲浪经常会遇到这种情况：刷到一篇长文章、或者一个几十分钟的 B 站干货视频，当时没空细看，随手点个收藏，结果进了收藏夹就再也没打开过；又或者过阵子突然想找以前看过的某个观点，却完全想不起来是在哪篇网页或哪个视频里看到的。
 
-- **想快速了解** → 让 AI 生成总结，几十秒抓住重点
-- **想深入提问** → 打开「对话」Tab，直接对着收藏的内容问答
-- **想永久沉淀** → 电脑上的归档脚本自动把正文/字幕 + AI 总结整理成 Markdown 文件，日积月累就是你的个人知识库
+**Webbin 就是为了解决这个问题做的小工具。**
 
-和 Pocket、Cubox 这类托管服务不同，Webbin **跑在你自己的 Cloudflare 账号上**：免费额度就够用，数据全程在自己手里，不经过任何第三方；LLM 用哪家、哪个模型，随时在面板里自己换（任何 OpenAI 兼容接口都行）。
+它平时只是一个缩在浏览器右下角的 📥 小按钮，不占地方。当你看到想留着的内容时：
 
-## 功能一览
+1. **点一下就能存起来**：普通网页会自动把排版干净的正文抠出来保存（不怕原网页以后失效或被删）；如果是 B 站视频，可以直接抓取视频的**字幕**和**高赞评论区（含楼中楼）**存成文字，你甚至可以在 UP 主主页按时间段一次性把几十个视频的字幕全抓下来。
+2. **手机和电脑互通**：电脑浏览器（Chrome / Edge）和手机（比如安卓 Edge）都能装，两边连的是你自己的同一个云端收集箱，随手存、随时看。
+3. **接上 AI 帮读、帮找（可选）**：如果你有 DeepSeek、OpenAI、硅基流动等任意家的 API Key，填进设置里，就能直接让 AI 帮你总结长文/长视频的要点；还能在「对话」里直接提问——比如*“我之前存过的文章里是怎么评价某某技术的？”*，它会自己去翻你存过的资料来回答，并标出出处。哪怕你不填 AI，只把它当成一个纯粹的网页/B站字幕收集器也完全能用。
+4. **完全免费、数据在自己手里**：市面上类似的稍后读软件大多要按月收费，东西也存在别人的服务器上。Webbin 借用了 Cloudflare 提供的免费云服务，不需要你买服务器，也不用懂编程，点几下按钮就能在自己的账号下搭一套私人后台，日常使用完全在免费额度内。
 
-- 📥 **一键保存** —— 网页自动提取正文，B 站视频页自动识别只存链接；手机/电脑 Edge 用同一份油猴脚本，收藏实时同步
-- 📚 **批量收藏** —— B 站 UP 主主页可按最近 7/30/90 天、最近 1 年或自定义日期批量抓取投稿字幕（选好时间范围后自动预计范围内投稿数量）；也可粘贴一批网址，普通网页自动提取正文、B 站视频自动抓字幕，一次全部存进收集箱
-- 🗂️ **收集箱面板** —— 查看、分组管理（增删改、批量移动）、AI 总结、下载 `.md`、删除
-- 🤖 **AI 总结** —— OpenAI 兼容 API，api_base / key / 模型随时改，key 只回显掩码、经 Worker 代理不出服务端
-- 💬 **知识库对话** —— 工具调用 Agent 形式的问答：助手自主检索和阅读你的收藏，而不是把全文塞给模型；范围即权限，带预算护栏
-- 💻 **自动归档** —— PC 端脚本一键拉取待归档条目：B 站视频下载字幕（CC/AI）+ AI 总结，网页正文落盘 Markdown，归档状态回写、手机上也能看到
-- ☁️ **零成本自托管** —— Cloudflare Workers 免费额度 + KV 存储，无需服务器；油猴脚本由 Worker 自己托管，**部署即最新**，不依赖第三方 CDN
+---
 
-## 整体架构
+## 怎么安装和部署？
 
+虽然说是“自己搭后台”，但全程**不用敲代码、也不用买服务器**。
+
+你只需要先准备好两个免费账号：
+- 一个 **GitHub 账号**（用来放代码副本）
+- 一个 **Cloudflare 账号**（用来免费运行你的私人后台，直接去 [cloudflare.com](https://www.cloudflare.com/) 注册即可，不需要绑信用卡）
+
+准备好后，按下面两步走，大约 5 分钟就能用上。
+
+### 第一步：一键搭建你的私人后台
+
+点击下面这个橙色按钮，会直接跳转到 Cloudflare 的自动部署向导：
+
+[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https%3A%2F%2Fgithub.com%2FMuYukk1%2FWebbin)
+
+打开后跟着页面提示走就行，只需要注意这几个地方：
+
+1. **关联 GitHub**：按页面提示登录 Cloudflare 并授权连接你的 GitHub，它会帮你在你自己的 GitHub 下复制一份本项目的代码（名字默认叫 `Webbin`，不用改）。
+2. **设置你的专属密码（重要）**：在页面里往下找 **Worker secrets（或密钥）** 这一栏，你会看到一个叫 `TOKEN` 的输入框。
+   - 在这里随便填一串**你自己设定的复杂密码**。
+   - *说明：这个密码就是你以后进自己收集箱的钥匙，防止别人乱看或乱存你的收集箱。它不是你的账号密码，也不是 AI 的 Key。*
+3. **点击部署（Deploy）**：页面里其他的选项（比如 `Build command` 是 `npm run build`、`Deploy command` 是 `npm run deploy`）保持默认不用动，直接点底部的 **Deploy**。
+4. **记下你的后台地址**：等它转圈跑完（大概一两分钟），页面上会给你一个类似 `https://webbin.xxxx.workers.dev` 的网址。**把这个网址复制下来**，你的后台就搭好了！
+
+> 💡 如果部署过程中遇到全英文看不懂、或者漏填了 `TOKEN` 导致报错，别慌，照着这篇《[新用户图文排错与详细手册](docs/DEPLOY.md)》一步步核对即可。
+
+---
+
+### 第二步：在浏览器里装插件并连上后台
+
+后台搭好后，我们需要在浏览器里把右下角的 📥 按钮装出来。它是通过浏览器很常用的「篡改猴（Tampermonkey）」扩展来运行的：
+
+1. **先装篡改猴扩展**：去浏览器的扩展商店搜索安装 [Tampermonkey](https://www.tampermonkey.net/)（电脑 Chrome / Edge 商店里都有；安卓手机如果用 Edge 浏览器，也可以直接在扩展里装 Tampermonkey）。
+   - *注：装好后如果浏览器提示“需开启开发者模式/运行用户脚本权限”，按篡改猴的提示在扩展管理里把开关打开。*
+2. **安装 Webbin 脚本**：
+   - 点击浏览器右上角的 Tampermonkey 图标 → 打开「**管理面板**」。
+   - 点顶部的「**实用工具**」标签页 → 找到「**从 URL 安装**」输入框。
+   - 在里面填上：`你的后台地址/userscript.user.js`
+     （比如你第一步拿到的地址是 `https://webbin.abc.workers.dev`，那这里就填 `https://webbin.abc.workers.dev/userscript.user.js`），然后点安装。
+3. **填入地址和密码**：
+   - 随便打开一个普通网页（注意浏览器自带的新标签页/设置页是不运行脚本的，随便开个百度或 B 站就行），你会看到网页右下角多了一个 **📥 按钮**。
+   - 点一下它，切到「**设置**」标签页：
+     - **Worker 地址**：填你第一步拿到的那个 `https://webbin.xxxx.workers.dev`（注意结尾不要带 `/userscript.user.js`）
+     - **Token**：填你第一步自己设定的那串 `TOKEN` 密码
+   - 点「**保存连接信息**」，再点一下「**测试连接**」。只要提示连接成功，大功告成！现在你可以随便点「保存当前页」试试看了。
+
+---
+
+## 日常怎么用？
+
+- **存单篇网页 / 视频**：看到想存的页面，点右下角 📥 → 点「保存当前页」。
+- **批量存网页 / 批量抓 B 站 UP 主字幕**：在面板里点「批量」，可以直接粘贴一堆网址进去；如果你当前正打开某个 B 站 UP 主的个人空间，还可以直接选时间范围（比如最近 30 天、最近一年），一键把这位 UP 主这段时间所有视频的字幕全抓进收集箱。
+- **配置 AI 总结与对话**：在面板「设置」里，往下拉找到 AI 配置：
+  - **API Base**：填你用的 AI 服务商接口地址（比如 DeepSeek 就是 `https://api.deepseek.com/v1`，OpenAI 就是 `https://api.openai.com/v1`）
+  - **API Key**：填你在对应平台申请的 Key（Key 会加密保存在你自己的 Cloudflare 后台里，不会泄露到网页前端）
+  - 点保存后，点一下「刷新模型列表」，选好你要用的模型再保存，就能在列表里点「总结」，或者去「对话」标签页里向你的收集箱提问了。
+- **管理分组**：东西存多了可以建不同的分组（比如“技术文章”、“菜谱”、“待看视频”），在「对话」提问时也可以指定只让 AI 翻某几个分组或某几篇资料。
+
+---
+
+## 进阶玩法与后续更新
+
+### 以后作者更新了新功能，我怎么升级？
+
+不需要重新部署，更不要再去点最上面的橙色部署按钮（重来一遍会新建一个空的收集箱）。
+
+升级只需要两步：
+1. 打开**你自己的 GitHub 仓库**（就是第一步自动帮你创建的那个 `Webbin` 仓库） → 点顶部的 **Actions** → 在左边点 **「更新 Webbin」** → 点右边的 **Run workflow**。等它跑完出现绿勾，你的后台就自动同步到最新版了，以前存的数据和设置全都会保留。
+2. 油猴脚本平时会自动检查更新；如果想立刻用上新版界面，去 Tampermonkey 管理面板里点一下「检查更新」，或者按安装时的办法重新「从 URL 安装」覆盖一次即可（本地聊天记录和设置不会丢）。
+
+详细说明和老用户迁移办法请看《[部署与更新手册](docs/DEPLOY.md)》。
+
+### 把收集箱自动存回电脑本地（可选）
+
+如果你习惯用 Obsidian、Logseq 等软件在电脑本地管理 Markdown 笔记，可以配合同系列的电脑端小工具 [bili-inbox](../bili-inbox) 一起用。配置好你的后台地址和密码后，双击运行就能把收集箱里新存的网页和 B 站视频字幕自动下载整理成电脑里的 `.md` 文件，并在手机/网页端标记为“已归档”。
+
+---
+
+<details>
+<summary><strong>🔧 开发者说明（本地调试与 API 接口文档，普通用户无需查看）</strong></summary>
+
+### 整体架构
+
+```text
+手机/电脑浏览器 (Tampermonkey 油猴脚本)
+       │
+       ▼  保存 / 查看 / 总结 / 对话
+Cloudflare Worker (index.js)  ──►  Cloudflare KV (持久化存储条目、分组与加密配置)
+       ▲
+       │  拉取待归档条目 / 回写归档状态
+PC 归档脚本 (bili-inbox，可选)
 ```
-手机 Edge(Tampermonkey)─┐
-                        ├─ 同一份油猴脚本 ──→ Cloudflare Worker(免费额度) ─→ KV
-电脑 Edge(Tampermonkey)─┘   保存/查看/总结/对话      ▲                存储+LLM配置
-                                                    │ 回写总结/归档状态
-电脑归档脚本(双击 run.cmd)：拉取待归档条目
-   ├─ B站视频 → 下载字幕(CC/AI) + AI 总结 → Inbox/bilibili/
-   └─ 网页   → 正文落盘 Markdown + AI 总结 → Inbox/web/
-```
 
-本仓库包含 **Worker 后端**（`index.js`，负责存储、LLM 配置管理、AI 请求代理、归档状态回写）和**油猴脚本**（`userscript/webbin.user.js`，同时作为自动更新源）。PC 归档脚本在独立项目 [bili-inbox](../bili-inbox)。
+本仓库包含 **Worker 后端**（`index.js`）和**油猴脚本**（`userscript/webbin.user.js`）。
 
-## 快速开始
-
-三步跑起来：**① 部署后端 → ② 装油猴脚本 → ③（可选）配置 PC 自动归档**。
-
-### 第一步：部署 Cloudflare Worker（约 10 分钟）
-
-后端跑在 Cloudflare 免费额度上，零常驻服务，不需要本地环境。
-
-**1. Fork 本仓库**
-
-点右上角 Fork。Fork 后到仓库 **Actions** 标签页确认工作流已启用（若提示则点 "I understand my workflows, go ahead and enable them"）。
-
-**2. 创建 KV 命名空间**
-
-[Cloudflare Dashboard](https://dash.cloudflare.com) → 左侧 **Storage & Databases → KV**（旧版界面在 **Workers & Pages → KV**）→ **Create namespace**，名字随意（如 `webbin`）→ 进入详情**复制 Namespace ID**（32 位十六进制串）。
-
-也可以用 CLI：`npx wrangler kv namespace create KV`，取输出中的 `id`。
-
-**3. 记下 Account ID**
-
-点击右上角 Ask AI，选择账户内用户名下方就是账户 ID。
-
-**4. 创建 API Token**
-
-[Cloudflare API Tokens](https://dash.cloudflare.com/profile/api-tokens) → **Create Token** → 选 **"Edit Cloudflare Workers"** 模板（已包含部署 Worker 与操作 KV 所需权限）→ Create Token → **复制生成的 token**（只显示一次）。第 3 步的 Account ID 也可以在这一步看到。
-
-**5. 配置仓库 Secrets**
-
-Fork 的仓库 → **Settings → Secrets and variables → Actions** → **New repository secret**，逐个添加：
-
-| Secret | 值 |
-|---|---|
-| `CLOUDFLARE_API_TOKEN` | 第 4 步生成的 token |
-| `CLOUDFLARE_ACCOUNT_ID` | 第 3 步的 Account ID |
-| `KV_NAMESPACE_ID` | 第 2 步的命名空间 ID |
-| `WORKER_TOKEN` | 自己生成的一串随机字符（≥32 位），作为客户端访问口令；油猴脚本设置页与 PC 脚本配置里填同一个值 |
-
-**6.（可选）改 Worker 名字**
-
-`wrangler.toml` 中 `name = "webbin"` 可改成自己的名字，它决定访问域名 `https://<name>.<account-subdomain>.workers.dev`。
-
-**7. 部署与验证**
-
-推送到 main（或在 **Actions → Test & Deploy → Run workflow** 手动触发）→ 等所有任务变绿 → 浏览器打开 `https://<name>.<account-subdomain>.workers.dev/`，看到：
-
-```json
-{"app": "webbin", "ok": true, "hint": "服务正常,请通过油猴脚本或 PC 脚本访问"}
-```
-
-即部署成功。
-
-> `wrangler.toml` 里的 `__KV_ID__` / `__WORKER_TOKEN__` 是占位符，部署时由 Action 从 Secrets 注入，真实值不会进仓库。
-
-### 第二步：安装油猴脚本
-
-脚本由 **Worker 自己托管**（路由 `/userscript.user.js`，公开访问），**部署即最新**，不依赖任何第三方 CDN——安装地址就是你自己 Worker 的地址，更新不再有 CDN 缓存延迟：
-
-```
-https://<你的Worker域名>/userscript.user.js
-```
-
-推荐统一用「**从 URL 安装**」，安装和更新走同一条路：
-
-1. 浏览器安装 [Tampermonkey](https://www.tampermonkey.net/) 扩展（桌面 Edge/Chrome 的应用商店；安卓 Edge 商店同样上架了 Tampermonkey，双端用同一份脚本）
-2. 点击浏览器工具栏的 Tampermonkey 图标 → **管理面板**
-3. 切到「**实用工具**」标签 → 找到「**从 URL 安装**」→ 粘贴上面的安装地址（先把 `<你的Worker域名>` 换成第一步部署得到的地址）→ 点「安装」
-4. 首次使用：任意网页点右下角 📥 悬浮按钮 → 「设置」→ 填 **Worker 地址**（部署后得到的 `https://<name>.<account>.workers.dev`）和 **Token**（部署时的 `WORKER_TOKEN`）→ 保存
-
-**更新方式**（任选其一）：
-
-- **自动**：Tampermonkey 会定期按安装地址后台检查并提示更新（Worker 部署完成即最新，无缓存等待）
-- **手动检查**：管理面板 → 已安装脚本里选中本脚本 → 「实用工具」→「检查更新」
-- **直接覆盖**：重复上面的「从 URL 安装」，同名同 namespace 原地覆盖，本地设置不丢
-
-> 收集箱面板底部会显示当前版本号，有新版时可直接点击打开安装页。
-
-### 第三步（可选）：PC 自动归档
-
-装好 Python 依赖、填一份配置，就能把收集箱里的条目自动归档成 Markdown 文件（B 站视频含字幕下载），还可以挂 Windows 计划任务每天定时跑。完整步骤见 [bili-inbox](../bili-inbox) 项目。
-
-## 本地开发
+### 本地开发
 
 ```bash
-npm install -g wrangler
-wrangler kv namespace create KV   # 把 id 填入 wrangler.toml,并把 TOKEN 改为随机串
-npm test                          # 路由逻辑测试(stub KV,无外部依赖)
-wrangler deploy
+npm ci
+# 复制 .dev.vars.example 为 .dev.vars，只在 .dev.vars 中填写本地测试用的 TOKEN
+npx wrangler dev                  # 启动本地 Worker（使用本地模拟 KV，不影响线上数据）
+npm run build                     # 运行完整单元测试套件
 ```
 
-## API 一览
+### HTTP API 列表
 
-所有 `/api/*` 请求需带 `x-token` 请求头（值 = `WORKER_TOKEN`）：
+除 `/` 与 `/userscript.user.js` 外，所有 `/api/*` 请求均需在 Header 中携带 `x-token: <你的 TOKEN>`：
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
 | POST | `/api/save` | 保存条目 `{url, title, site, type, content, group_id?}` |
-| GET | `/api/items` | 列表（摘要，不含正文；`?full=1` 全量；条目含 `group_id`） |
-| GET/DELETE | `/api/item/:id` | 单条 / 删除 |
-| POST | `/api/summarize` | 对条目正文生成 AI 总结 `{id}` |
-| POST | `/api/status` | PC 归档脚本回写 `{id, status, archive, summary}` |
-| GET/POST | `/api/settings` | LLM 配置（GET 回显掩码 key；POST 留空/掩码不覆盖） |
-| POST | `/api/models` | 代理拉取 `{api_base}/models` 模型列表 |
-| GET/POST | `/api/groups` | 分组列表 / 管理（`{action: create\|rename\|delete, id?, name?}`） |
-| POST | `/api/group/assign` | 批量移动条目 `{ids[≤200], group_id}` |
-| GET | `/api/kb/metadata` | 有界分页元数据 `?cursor=&limit=`（单页 ≤40；含标题/来源/分组/摘要，不含正文） |
-| POST | `/api/chat` | 知识库对话代理：透传 `{messages, tools?, tool_choice?, model?}` 到 chat completions，支持原生工具调用；`tool_choice` 仅放行 `"none"`（收尾强制文本作答），默认用设置页模型，可用 `model` 覆盖 |
+| GET | `/api/items` | 获取条目列表（默认不含正文；传 `?full=1` 返回全量内容） |
+| GET/DELETE | `/api/item/:id` | 获取单条详情（含正文） / 删除单条 |
+| POST | `/api/summarize` | 调用配置的 LLM 对指定条目生成总结 `{id}` |
+| POST | `/api/status` | PC 归档脚本回写归档结果 `{id, status, archive, summary}` |
+| GET/POST | `/api/settings` | 读取 / 保存 LLM 配置（GET 对 API Key 做掩码回显） |
+| POST | `/api/models` | 通过服务端代理拉取 `{api_base}/models` 模型列表 |
+| GET/POST | `/api/groups` | 获取分组列表 / 增删改分组（`{action: create\|rename\|delete, id?, name?}`） |
+| POST | `/api/group/assign` | 批量移动条目到指定分组 `{ids[≤200], group_id}` |
+| GET | `/api/kb/metadata` | 分页读取知识库元数据 `?cursor=&limit=`（单页 ≤40，不含正文） |
+| POST | `/api/chat` | 知识库对话代理接口，转发至上游 OpenAI 兼容 `/chat/completions` |
 
-## 知识库对话（对话 Tab）
-
-油猴面板「对话」Tab 基于收藏内容做问答，采用**工具调用 Agent** 形式：资料全文不会一次性塞给模型，助手通过三个只读工具自主检索和阅读——`list_items`（浏览范围）、`search_kb`（搜标题/总结）、`read_item`（分段读正文，长文用 `next_cursor` 续读）。
-
-- **范围**：输入框下方「分组」「资料」两个多选下拉（按分组可全选；按资料可搜索点选，也可在列表勾选后点「就这些聊」，最多 20 条，摘要自动注入、正文仍按需读取）。范围即权限，模型无法用工具参数读到范围外的条目；**首轮发送时锁定范围快照**，运行中改勾选只影响下一轮。首次使用未选过范围时自动全选分组（范围=全库，可随时收窄）。
-- **预算护栏**：单轮问答最多 8 次模型请求、16 次工具执行，累计注入工具正文 ≤24000 字符；到限明确终止并提示，不静默截断。
-- **分组**：设置页可增删改分组；删除分组不删资料，组内条目自动按默认组解释。
-- **会话**：保存在油猴脚本本地（GM 存储），按设备/浏览器各自独立，不上云、不同步；切 Tab/收起/关闭面板不丢（运行中的回答完成后照常落盘）；刷新页面会中断运行中的回答（恢复历史并标注中断，不自动重发）。当前会话上限 60 条；开始新会话时上一段自动存入**历史**（顶栏「历史」，最多 20 段），可随时查看、继续或删除；点开历史会话不会让它消失，继续聊后原地更新原条目并置顶。
-- **安全**：模型请求经 Worker 代理，API Key 不出服务端；资料内容按数据注入（提示注入不可触发写入/删除/越权）；回答区纯文本渲染，引用可点击跳转原文。
-
-## 说明
-
-仅用于个人收藏同步，数据全在自己账号的 KV 中；`WORKER_TOKEN` 等同访问密码，请勿外传。
+</details>
